@@ -1,6 +1,6 @@
 # ADR-0004: Chaos is planned up front from a seed
 
-- Status: Proposed
+- Status: Accepted (2026-11-20)
 - Date: 2026-11-20
 
 ## Context
@@ -16,6 +16,6 @@ A chaos tool that finds a bug but can't reproduce it is of little use. `Math.ran
 
 ## Consequences
 
-- Hookstorm's own behaviour is exactly reproducible. The *app's* behaviour under concurrency may not be: a race found with seed 42 may only show up on some runs. The report says so honestly (e.g. "concurrent fault involved: may be timing-dependent"), and `--repeat-seed K` reruns a seed several times to measure how often it fails.
+- Hookstorm's own behaviour is exactly reproducible. The _app's_ behaviour under concurrency may not be: a race found with seed 42 may only show up on some runs. The report says so honestly (e.g. "concurrent fault involved: may be timing-dependent"), and rerunning the printed command a few times shows how often it fails. (A built-in `--repeat-seed K` flag is planned, not in v0.1.)
 - Unit-testing the scenario engine is simple: it's a pure function.
 - Shrinking (finding the smallest failing plan) becomes possible later because plans are data.

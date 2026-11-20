@@ -1,0 +1,76 @@
+{
+  "name": "hookstorm-cli",
+  "version": "0.1.0",
+  "description": "Chaos-test your webhook receivers: duplicates, reordering, delays, dropped responses and timeouts, checked against your business invariants.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "hookstorm": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "keywords": [
+    "webhook",
+    "webhooks",
+    "chaos",
+    "testing",
+    "idempotency",
+    "stripe",
+    "paystack",
+    "github",
+    "retries"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "demo:buggy": "node examples/buggy-receiver/server.mjs",
+    "demo:fixed": "node examples/fixed-receiver/server.mjs",
+    "prepublishOnly": "npm run build",
+    "demo": "bash scripts/demo.sh",
+    "hookstorm": "node dist/cli.js"
+  },
+  "dependencies": {
+    "commander": "^15.1.0",
+    "jiti": "^2.7.0",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@octokit/webhooks-methods": "^6.0.0",
+    "@types/node": "^26.6.6",
+    "eslint": "^10.15.0",
+    "prettier": "^3.10.1",
+    "stripe": "^23.2.0",
+    "tsup": "^9.0.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.73.0",
+    "vitest": "^5.1.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vyktoremario/hookstorm.git"
+  },
+  "homepage": "https://github.com/vyktoremario/hookstorm#readme",
+  "bugs": {
+    "url": "https://github.com/vyktoremario/hookstorm/issues"
+  }
+}
