@@ -3,7 +3,7 @@ export type { HookstormConfig, ResolvedConfig, ConfigOverrides } from './config.
 export { atMostOnce, exactlyOnce, monotonic, finalState, custom } from './invariants.js';
 export type { CallKey, EventKey, ExactlyOnceOptions, MonotonicOptions } from './invariants.js';
 export { loadConfigFile, resolveConfig } from './config.js';
-export { runSuite, runOnce, seedsFor } from './runner.js';
+export { runSuite, runOnce, seedsFor, checkReachable, UnreachableError } from './runner.js';
 export type { RunResult, SuiteResult } from './runner.js';
 export { buildPlan } from './scenario.js';
 export { PROFILES } from './profiles.js';

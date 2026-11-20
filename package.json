@@ -45,8 +45,9 @@
     "demo:buggy": "node examples/buggy-receiver/server.mjs",
     "demo:fixed": "node examples/fixed-receiver/server.mjs",
     "prepublishOnly": "npm run build",
-    "demo": "bash scripts/demo.sh",
-    "hookstorm": "node dist/cli.js"
+    "demo": "node scripts/demo.mjs",
+    "hookstorm": "node dist/cli.js",
+    "demo:smoke": "node scripts/demo.mjs --smoke"
   },
   "dependencies": {
     "commander": "^15.1.0",

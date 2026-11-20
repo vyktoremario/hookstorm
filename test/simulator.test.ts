@@ -36,12 +36,13 @@ async function run(
   url: string,
   preset: ProviderPreset = paystack,
   evs: WebhookEvent[] = events({ event: 'charge.success', data: { reference: 'r1' } }),
+  timeoutMs = 200,
 ) {
   return executePlan(plan, new Map(evs.map((e) => [e.id, e])), {
     target: url,
     preset,
     secret: 'sk_test',
-    timeoutMs: 200,
+    timeoutMs,
     maxAttempts: plan.deliveries[0]!.faults.length,
     backoffMs: [5],
     t0: performance.now(),
@@ -126,17 +127,19 @@ describe('executePlan', () => {
   });
 
   it('runs concurrent deliveries in parallel', async () => {
-    const rx = await fakeReceiver(() => ({ delayMs: 50 }));
+    const rx = await fakeReceiver(() => ({ delayMs: 300 }));
     close = rx.close;
     const plan = one(['none']);
     plan.deliveries.push({ ...plan.deliveries[0]!, deliveryId: 'e1#1', copy: 1, concurrentWith: 'e1#0' });
     await run(plan, rx.url);
     expect(rx.requests).toHaveLength(2);
-    expect(Math.abs(rx.requests[0]!.at - rx.requests[1]!.at)).toBeLessThan(40);
+    // Both requests arrive before the first response could have been sent.
+    expect(Math.abs(rx.requests[0]!.at - rx.requests[1]!.at)).toBeLessThan(250);
   });
 
   it('records connection errors', async () => {
-    const [d] = await run(one(['none']), 'http://127.0.0.1:1/nothing-here');
+    // Generous timeout: on Windows a refused connection takes ~2 s to surface as an error.
+    const [d] = await run(one(['none']), 'http://127.0.0.1:1/nothing-here', paystack, undefined, 10_000);
     expect(d!.attempts[0]!.outcome).toBe('error');
   });
 });

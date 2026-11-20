@@ -9,7 +9,7 @@ import type { ProviderName } from './presets.js';
 import type { ProfileName } from './profiles.js';
 import { startRecorder } from './record.js';
 import { formatRunLine, formatSuite, toJson, toJunit } from './report.js';
-import { runSuite, seedsFor } from './runner.js';
+import { runSuite, seedsFor, UnreachableError } from './runner.js';
 import { randomSeed } from './prng.js';
 import { VERSION } from './version.js';
 
@@ -85,7 +85,7 @@ program
   .description('create hookstorm.config.ts and sample events for a provider')
   .addOption(
     new Option('--provider <name>', 'provider preset')
-      .choices(['stripe', 'paystack', 'github'])
+      .choices(['stripe', 'paystack', 'github', 'custom'])
       .default('stripe'),
   )
   .option('-t, --target <url>', 'your webhook endpoint', 'http://localhost:3000/webhooks')
@@ -125,6 +125,10 @@ program
 
 program.parseAsync().catch((err: unknown) => {
   const e = err as Error;
-  console.error(pc.red(`hookstorm: ${e instanceof ConfigError ? e.message : (e.stack ?? e.message)}`));
+  console.error(
+    pc.red(
+      `hookstorm: ${e instanceof ConfigError || e instanceof UnreachableError ? e.message : (e.stack ?? e.message)}`,
+    ),
+  );
   process.exitCode = 2;
 });

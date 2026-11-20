@@ -20,6 +20,8 @@ jobs:
         include:
           - os: macos-latest
             node: 24
+          - os: windows-latest
+            node: 24
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -32,5 +34,5 @@ jobs:
       - run: npm run build
       - run: npm test
       - name: Demo smoke test (buggy must fail, fixed must pass)
-        run: bash scripts/demo-smoke.sh
+        run: npm run demo:smoke
       - run: npm pack --dry-run

@@ -1,4 +1,4 @@
-import type { ChildProcess } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { loadConfigFile, resolveConfig } from '../src/config.js';
@@ -45,5 +45,36 @@ describe('demo receivers', () => {
       .map((r) => ({ seed: r.seed, v: r.violations }));
     expect(failures).toEqual([]);
     expect(suite.passed).toBe(true);
+  });
+});
+
+describe('probe-only example (custom provider, no sink)', () => {
+  const PROBE_CONFIG = resolve('examples/probe-only.config.ts');
+
+  async function run(idempotent: boolean) {
+    const port = await freePort();
+    const proc = spawn(process.execPath, ['examples/probe-only-receiver/server.mjs'], {
+      env: { ...process.env, PORT: String(port), IDEMPOTENT: idempotent ? '1' : '0' },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    procs.push(proc);
+    await new Promise<void>((r) =>
+      proc.stdout!.on('data', (d: Buffer) => d.toString().includes('listening') && r()),
+    );
+    const cfg = await resolveConfig(await loadConfigFile(PROBE_CONFIG), PROBE_CONFIG, {
+      target: `http://127.0.0.1:${port}/webhooks`,
+      sinkPort: await freePort(),
+    });
+    return runSuite(cfg, seedsFor(1, 10));
+  }
+
+  it('finds duplicate ledger entries in the non-idempotent receiver', async () => {
+    const suite = await run(false);
+    expect(suite.failedInvariants).toEqual(['one ledger entry per payment']);
+  });
+
+  it('passes once the receiver is idempotent', async () => {
+    const suite = await run(true);
+    expect(suite.runs.flatMap((r) => r.violations)).toEqual([]);
   });
 });

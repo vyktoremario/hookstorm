@@ -1,3 +1,4 @@
+import net from 'node:net';
 import type { ResolvedConfig } from './config.js';
 import { buildPlan } from './scenario.js';
 import { executePlan, sleep } from './simulator.js';
@@ -134,12 +135,39 @@ export async function runOnce(cfg: ResolvedConfig, sink: SinkServer, seed: numbe
   };
 }
 
+/** The target refused or never answered a TCP connection. */
+export class UnreachableError extends Error {}
+
+/**
+ * Checks the target accepts TCP connections before any run starts. Without this, a receiver that isn't running
+ * looks like a stream of timeouts on platforms where refused connections are slow to fail (Windows).
+ */
+export function checkReachable(target: string, timeoutMs = 5000): Promise<void> {
+  const u = new URL(target);
+  const port = Number(u.port || (u.protocol === 'https:' ? 443 : 80));
+  const host = u.hostname.replace(/^\[|\]$/g, '');
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({ host, port });
+    const fail = (why: string) => {
+      socket.destroy();
+      reject(new UnreachableError(`could not reach ${target}: ${why}. Is the receiver running?`));
+    };
+    socket.setTimeout(timeoutMs, () => fail(`no answer within ${timeoutMs}ms`));
+    socket.once('error', (e) => fail(e.message));
+    socket.once('connect', () => {
+      socket.end();
+      resolve();
+    });
+  });
+}
+
 export async function runSuite(
   cfg: ResolvedConfig,
   seeds: number[],
   hooks: RunHooks = {},
 ): Promise<SuiteResult> {
   const started = performance.now();
+  await checkReachable(cfg.target);
   const sink = new SinkServer(cfg.sinkFaults);
   try {
     await sink.start(cfg.sinkPort, cfg.sinkHost);
