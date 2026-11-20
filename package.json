@@ -1,6 +1,6 @@
 {
   "name": "hookstorm-cli",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Chaos-test your webhook receivers: duplicates, reordering, delays, dropped responses and timeouts, checked against your business invariants.",
   "license": "MIT",
   "type": "module",
