@@ -1,17 +1,19 @@
 name: Release
 
-# Publishes to npm when a v* tag is pushed. Requires the NPM_TOKEN repository secret.
+# Publishes to npm when a v* tag is pushed, using npm trusted publishing (OIDC): no npm token is stored in
+# this repository, and provenance is attached automatically. One-time setup: docs/RELEASING.md.
 on:
   push:
     tags: ['v*']
 
 permissions:
   contents: read
-  id-token: write # npm provenance
+  id-token: write # lets npm verify this workflow via OIDC
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: npm
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -19,10 +21,18 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
           cache: npm
+      - name: Use an npm that supports trusted publishing (>= 11.5.1)
+        run: npm install -g npm@^11.5.1 && npm --version
+      - name: Check the tag matches the package version
+        run: |
+          PKG="v$(node -p "require('./package.json').version")"
+          SRC="v$(node -p "require('fs').readFileSync('src/version.ts','utf8').match(/'(.+)'/)[1]")"
+          if [ "$GITHUB_REF_NAME" != "$PKG" ] || [ "$PKG" != "$SRC" ]; then
+            echo "Tag $GITHUB_REF_NAME, package.json $PKG and src/version.ts $SRC must all match"; exit 1
+          fi
       - run: npm ci
+      - run: npm run lint
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm publish --access public

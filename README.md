@@ -67,7 +67,7 @@ What was wrong, and how each fix maps to a rule:
 
 - Buggy receiver: **5 of 5 invariants violated in 5 of 5 seeds** (seeds 1–5, `realistic` profile), about 8 s.
 - Fixed receiver: **all invariants held across 50 seeds** on `realistic` (42 s) and **30 seeds on `hostile`** (35 s).
-- Both results are checked in CI by [`test/demo.integration.test.ts`](test/demo.integration.test.ts) and [`scripts/demo-smoke.sh`](scripts/demo-smoke.sh).
+- Both results are checked in CI by [`test/demo.integration.test.ts`](test/demo.integration.test.ts) and the `npm run demo:smoke` step, on Linux, macOS and Windows.
 
 ## How it works
 
@@ -90,17 +90,18 @@ Design decisions are recorded in [docs/adr](docs/adr), and the full spec is in [
 
 ## Use it on your app
 
+**Step-by-step guide: [Testing your own webhook receiver](docs/guide-your-own-receiver.md).** It covers any provider (including ones without a preset), recording events, the probe-only setup, and writing invariants.
+
 ```bash
 npm i -D hookstorm-cli
-npx hookstorm init --provider stripe --target http://localhost:3000/webhooks/stripe
+npx hookstorm init --provider custom --target http://localhost:3000/webhooks   # or stripe | paystack | github
 ```
 
 `init` creates `hookstorm.config.ts` and `hookstorm.events.jsonl`. Then:
 
-1. **Point side effects at the sink.** Wherever your handler charges, ships or emails, make the base URL configurable and set it to `http://127.0.0.1:4400/sink` in the test environment. A call to `POST /sink/order.fulfil` is recorded as effect `order.fulfil`.
-2. **Optionally add two test-only routes**, mounted only when `NODE_ENV=test`: `POST /hookstorm/reset` (clear state between seeds) and `GET /hookstorm/state` (JSON snapshot for `finalState`).
-3. **Use your test-mode secret.** Never use a production secret. Hookstorm signs with whatever secret your local app verifies against.
-4. **Write the invariants**, then run `npx hookstorm run`.
+1. **Match your provider's signature.** Use a preset, or write a `sign` function for `provider: 'custom'`. Use your **test-mode** secret, never a production one.
+2. **Let Hookstorm see what your app did.** Either add two test-only routes (`POST /hookstorm/reset`, `GET /hookstorm/state`) and check the state, or point the app's outgoing calls at the sink (`http://127.0.0.1:4400/sink/<effect>`). The probe route needs no change to your handler. See [`examples/probe-only-receiver`](examples/probe-only-receiver/server.mjs).
+3. **Write the invariants**, then run `npx hookstorm run`.
 
 ```ts
 import { atMostOnce, custom, defineConfig, exactlyOnce, finalState, monotonic } from 'hookstorm-cli';
@@ -169,7 +170,7 @@ The recorder saves each body byte-for-byte, drops signature headers (replays are
 ```text
 hookstorm run   [-c hookstorm.config.ts] [--target url] [--seed n] [--runs 10] [--profile realistic]
                 [--timeout ms] [--settle ms] [--sink-port 4400] [--json report.json] [--junit report.xml] [-q]
-hookstorm init  [--provider stripe|paystack|github] [--target url]
+hookstorm init  [--provider stripe|paystack|github|custom] [--target url]
 hookstorm record --provider <name> [--port 4500] [--forward url] [-o hookstorm.events.jsonl]
 ```
 
@@ -197,4 +198,4 @@ npm run lint && npm run typecheck && npm run build && npm test
 npm run demo
 ```
 
-Requires Node ≥ 22.12. MIT licensed.
+Requires Node ≥ 22.12. Tested on Linux, macOS and Windows. Releases: [docs/RELEASING.md](docs/RELEASING.md). MIT licensed.

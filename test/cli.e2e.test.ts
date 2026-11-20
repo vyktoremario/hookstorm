@@ -52,7 +52,7 @@ describe.skipIf(!existsSync(CLI))('CLI (built)', () => {
       dir,
     );
     expect(out.code).toBe(2);
-    expect(out.stdout).toMatch(/could not reach/);
+    expect(out.stderr).toMatch(/could not reach .* Is the receiver running\?/);
     expect((await cli(['init'], dir)).code).toBe(2); // refuses to overwrite
   });
 
