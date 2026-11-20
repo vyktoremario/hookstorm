@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.1](https://github.com/vyktoremario/hookstorm/compare/v0.1.0...v0.1.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* normalise the bin path so npm no longer rewrites it on publish ([b62f741](https://github.com/vyktoremario/hookstorm/commit/b62f74160513700adde803bb8acffc6583b02a48))
+
+
+### Documentation
+
+* add an npm version badge to the README ([b62f741](https://github.com/vyktoremario/hookstorm/commit/b62f74160513700adde803bb8acffc6583b02a48))
+
 ## 0.1.0 (2026-11-20)
 
 First release.
