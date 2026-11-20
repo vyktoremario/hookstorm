@@ -127,7 +127,11 @@ reset: '/hookstorm/reset', // POST before each seed, so runs don't leak into eac
 probe: '/hookstorm/state', // GET after each seed; available to invariants as `state`
 ```
 
-The probe should return whatever your rules need to look at: rows, counts, balances. A full working example is [`examples/probe-only-receiver`](../examples/probe-only-receiver/server.mjs) with [`examples/probe-only.config.ts`](../examples/probe-only.config.ts).
+The probe should return whatever your rules need to look at: rows, counts, balances.
+
+**Return business data only.** Leave out anything that changes without a webhook doing anything: `updated_at` and other timestamps, request counters, cache stats, random ids generated on read. Hookstorm compares the state right after `reset` with the state after the run, both to warn when the events had no effect and for `eventsTakeEffect`. A field that changes on every read makes every run look like it did something, and those checks stop working. Select the columns you mean (`SELECT id, status, quantity …`), not `SELECT *`.
+
+A full working example is [`examples/probe-only-receiver`](../examples/probe-only-receiver/server.mjs) with [`examples/probe-only.config.ts`](../examples/probe-only.config.ts).
 
 ### Option B: sink (when the handler calls other services)
 
@@ -165,6 +169,19 @@ Hookstorm also checks this for you. When a probe is configured, it reads the sta
 
 If every run gets a warning, the result is **inconclusive**, not a pass: `hookstorm run` exits with code 2, and the JUnit report has a failing "events had a visible effect" test.
 
+The warning only fires when _nothing_ changed. If two of three orders are seeded and the third isn't, the third's events are still silently ignored. Add `eventsTakeEffect` to check every event individually:
+
+```ts
+eventsTakeEffect({
+  forEachEvent: ['payment_intent.succeeded', 'charge.refunded'],
+  eventKey: (e) => orderIdOf(e),                                  // the record each event is about
+  record: (state, id) => state.orders.find((o) => o.id === id),   // where to find it in the probe snapshot
+}),
+// → "payment_intent.succeeded for ord_3 was acknowledged, but ord_3 doesn't exist: seed it in reset…"
+```
+
+For each acknowledged event of those types, the record must exist and must differ between the start and the end of the run. With the sink instead of a probe, use `effect` and `key` in place of `record`: `eventsTakeEffect({ forEachEvent: 'payment.completed', eventKey, effect: 'payments.charge', key: (c) => c.body.reference })`.
+
 ## 4. Write invariants
 
 Write the rules your business already has. Some starting points:
@@ -172,6 +189,7 @@ Write the rules your business already has. Some starting points:
 | Rule                       | With the probe (`state`)                                            | With the sink                                                                          |
 | -------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | No double charge or credit | `custom`: count `state.ledger` rows per reference                   | `atMostOnce('payments.charge', (c) => c.body.reference)`                               |
+| Events aren't ignored      | `eventsTakeEffect({ forEachEvent, eventKey, record })`              | `eventsTakeEffect({ forEachEvent, eventKey, effect, key })`                            |
 | No lost events             | `custom`: every acknowledged event's reference is in `state.ledger` | `exactlyOnce('payments.charge', key, { forEachEvent: 'payment.completed', eventKey })` |
 | State never goes backwards | `finalState`: refunded orders are still `refunded`                  | `monotonic('order.status', ['pending', 'paid', 'shipped'], { key })`                   |
 | Balances add up            | `custom`: compare balances with the acknowledged events             | n/a                                                                                    |

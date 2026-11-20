@@ -144,6 +144,7 @@ export async function runOnce(cfg: ResolvedConfig, sink: SinkServer, seed: numbe
     deliveries,
     sink: sinkCalls,
     state,
+    baseline,
     isAcked: (id) => ackedEvents.has(id),
   };
   for (const inv of cfg.invariants) {

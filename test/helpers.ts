@@ -95,6 +95,7 @@ export function observations(partial: Partial<Observations> & { acked?: string[]
     deliveries: [],
     sink: [],
     state: undefined,
+    baseline: undefined,
     isAcked: (id) => acked.has(id),
     ...partial,
   };

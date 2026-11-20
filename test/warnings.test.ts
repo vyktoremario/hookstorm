@@ -89,7 +89,30 @@ describe('runSuite with repeated seeds', () => {
       [10, 2],
     ]);
     expect(s.repeat).toBe(2);
+    // invariants can compare the state right after reset with the state after the run
+    expect(s.runs.every((r) => r.state !== undefined)).toBe(true);
     // Same seed, same plan: only the app's timing can differ between repeats.
     expect(s.runs[0]!.plan).toEqual(s.runs[1]!.plan);
+  });
+});
+
+describe('observations.baseline', () => {
+  it('is the probe snapshot taken right after reset, before any delivery', async () => {
+    let n = 0;
+    const seen: Array<[unknown, unknown]> = [];
+    const rx = await fakeReceiver();
+    close = rx.close;
+    const cfg = await resolveConfig({
+      target: rx.url,
+      provider: 'paystack',
+      secret: 'sk_test',
+      events: [{ id: 'e1', body: { event: 'charge.success', data: { reference: 'r1' } } }],
+      settleMs: 0,
+      sink: { port: await freePort() },
+      probe: () => ({ read: n++ }),
+      invariants: [custom('capture', ({ baseline, state }) => void seen.push([baseline, state]))],
+    });
+    await runSuite(cfg, [1]);
+    expect(seen).toEqual([[{ read: 0 }, { read: 1 }]]);
   });
 });

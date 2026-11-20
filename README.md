@@ -105,7 +105,15 @@ npx hookstorm init --provider custom --target http://localhost:3000/webhooks   #
 3. **Write the invariants**, then run `npx hookstorm run`.
 
 ```ts
-import { atMostOnce, custom, defineConfig, exactlyOnce, finalState, monotonic } from 'hookstorm-cli';
+import {
+  atMostOnce,
+  custom,
+  defineConfig,
+  eventsTakeEffect,
+  exactlyOnce,
+  finalState,
+  monotonic,
+} from 'hookstorm-cli';
 
 export default defineConfig({
   target: 'http://localhost:3000/webhooks/stripe',
@@ -124,6 +132,11 @@ export default defineConfig({
       forEachEvent: 'payment_intent.succeeded',
       eventKey: (e) => e.json.data.object.metadata.order_id,
     }),
+    eventsTakeEffect({
+      forEachEvent: 'payment_intent.succeeded',
+      eventKey: (e) => e.json.data.object.metadata.order_id,
+      record: (state, id) => state.orders.find((o) => o.id === id), // catches events the app silently ignored
+    }),
     monotonic('order.status', ['pending', 'paid', 'shipped', 'refunded'], { key: (c) => c.body.orderId }),
     finalState('refunded orders stay refunded', (state) => state.orders.ord_1.status === 'refunded'),
     custom('no fulfilment for failed payments', ({ sink }) =>
@@ -137,13 +150,14 @@ export default defineConfig({
 
 ### Invariant helpers
 
-| Helper                                       | Catches                                                                                                          |
-| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `atMostOnce(effect, key)`                    | double charge, double fulfilment, duplicate emails                                                               |
-| `exactlyOnce(effect, key, { forEachEvent })` | duplicates **and** lost events (acked, but the work never happened). Skips events the provider is still retrying |
-| `monotonic(effect, order, { key })`          | state moving backwards in the side-effect stream                                                                 |
-| `finalState(description, (state) => …)`      | wrong final state, read from your probe                                                                          |
-| `custom(name, (observations) => string[])`   | anything else: you get events, plan, delivery log, sink log and state                                            |
+| Helper                                                 | Catches                                                                                                                              |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `atMostOnce(effect, key)`                              | double charge, double fulfilment, duplicate emails                                                                                   |
+| `exactlyOnce(effect, key, { forEachEvent })`           | duplicates **and** lost events (acked, but the work never happened). Skips events the provider is still retrying                     |
+| `monotonic(effect, order, { key })`                    | state moving backwards in the side-effect stream                                                                                     |
+| `finalState(description, (state) => …)`                | wrong final state, read from your probe                                                                                              |
+| `eventsTakeEffect({ forEachEvent, eventKey, record })` | events your app acknowledged but ignored, e.g. because `reset` didn't seed the record they refer to. Also works with a sink `effect` |
+| `custom(name, (observations) => string[])`             | anything else: you get events, plan, delivery log, sink log and state                                                                |
 
 Only sink calls that succeeded count. A call the sink failed on purpose didn't happen.
 

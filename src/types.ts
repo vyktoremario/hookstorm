@@ -98,6 +98,8 @@ export interface Observations {
   sink: SinkCall[];
   /** Snapshot from the probe, if configured. Typed loosely so invariants can read it directly. */
   state: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  /** Probe snapshot taken right after `reset`, before any event was delivered. */
+  baseline: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   /** True when the provider received a success for at least one delivery of the event. */
   isAcked(eventId: string): boolean;
 }

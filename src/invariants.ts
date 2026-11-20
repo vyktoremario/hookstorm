@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { Invariant, Observations, SinkCall, Violation, WebhookEvent } from './types.js';
 
 export type CallKey = (call: SinkCall) => string | number | undefined | null;
@@ -185,6 +186,98 @@ export function custom(
       return result.map((r) =>
         typeof r === 'string' ? { invariant: name, message: r } : { ...r, invariant: name },
       );
+    },
+  };
+}
+
+export interface EventsTakeEffectOptions {
+  /** Which events must have an effect: an event type, several types, or a predicate. */
+  forEachEvent: string | string[] | ((event: WebhookEvent) => boolean);
+  /** The record (or business key) an event is about, e.g. its order id. */
+  eventKey: EventKey;
+  /**
+   * Probe mode: find that record in a probe snapshot. It must differ between the snapshot taken right after
+   * `reset` and the one after the run. Return `undefined` if the record doesn't exist.
+   */
+  record?: (state: any, key: string) => unknown; // eslint-disable-line @typescript-eslint/no-explicit-any
+  /** Sink mode: the side effect the event must cause at least once, matched to the event by `key`. */
+  effect?: string;
+  key?: CallKey;
+  description?: string;
+}
+
+/**
+ * Every acknowledged event of a kind actually did something: its record changed, or its side effect happened.
+ * Catches handlers that answer 200 but ignore the event, typically because `reset` didn't seed the record the
+ * event refers to, so the app logs "unknown order" and moves on.
+ *
+ * Records are compared once per key, between the start and the end of the run. If two events touch the same
+ * record (a payment and its refund), the rule holds as long as the record changed at all.
+ */
+export function eventsTakeEffect(opts: EventsTakeEffectOptions): Invariant {
+  const probeMode = opts.record !== undefined;
+  if (probeMode === (opts.effect !== undefined))
+    throw new Error('eventsTakeEffect: pass either `record` (probe mode) or `effect` + `key` (sink mode)');
+  if (!probeMode && !opts.key)
+    throw new Error('eventsTakeEffect: `effect` needs `key` to match calls to events');
+  const types = typeof opts.forEachEvent === 'string' ? [opts.forEachEvent] : opts.forEachEvent;
+  const matches = Array.isArray(types) ? (e: WebhookEvent) => types.includes(e.type) : types;
+  const what = Array.isArray(types) ? types.join(' / ') : 'matching';
+  const name = opts.description ?? `every acknowledged ${what} event takes effect`;
+
+  return {
+    name,
+    check(obs) {
+      if (probeMode && (obs.state === undefined || obs.baseline === undefined))
+        return [
+          {
+            invariant: name,
+            message: 'no state snapshots: configure `probe` to use eventsTakeEffect({ record })',
+          },
+        ];
+      const byKey = groupBy(
+        obs.events.filter((e) => matches(e) && obs.isAcked(e.id)),
+        (e) => opts.eventKey(e) ?? `(no key: ${e.id})`,
+      );
+      const out: Violation[] = [];
+      for (const [k, events] of byKey) {
+        const eventIds = events.map((e) => e.id);
+        const label = [...new Set(events.map((e) => e.type))].join(' + ');
+        if (k.startsWith('(no key: ')) {
+          out.push({
+            invariant: name,
+            eventIds,
+            message: `${label} ${eventIds.join(', ')}: eventKey returned nothing`,
+          });
+          continue;
+        }
+        if (probeMode) {
+          const before = opts.record!(obs.baseline, k);
+          const after = opts.record!(obs.state, k);
+          if (before === undefined && after === undefined)
+            out.push({
+              invariant: name,
+              key: k,
+              eventIds,
+              message: `${label} for ${k} was acknowledged, but ${k} doesn't exist: seed it in reset, or the event can't be tested`,
+            });
+          else if (isDeepStrictEqual(before, after))
+            out.push({
+              invariant: name,
+              key: k,
+              eventIds,
+              message: `${label} for ${k} was acknowledged but changed nothing`,
+            });
+        } else if (!obs.sink.some((c) => c.ok && c.effect === opts.effect && String(opts.key!(c)) === k)) {
+          out.push({
+            invariant: name,
+            key: k,
+            eventIds,
+            message: `${label} for ${k} was acknowledged but ${opts.effect} never happened`,
+          });
+        }
+      }
+      return out;
     },
   };
 }
