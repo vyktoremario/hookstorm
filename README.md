@@ -2,7 +2,7 @@
 
 **Chaos-test your webhook _receivers_.** Hookstorm plays the webhook provider. It delivers your events with duplicates, reordering, delays, dropped requests, dropped responses and timeouts, retrying the way Stripe, Paystack or GitHub would. Then it checks your business rules ("each payment is credited at most once", "a refunded order stays refunded") and tells you which ones broke, with a seed that reproduces the failure.
 
-[![CI](https://github.com/OWNER/hookstorm/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/hookstorm/actions/workflows/ci.yml)
+[![CI](https://github.com/vyktoremario/hookstorm/actions/workflows/ci.yml/badge.svg)](https://github.com/vyktoremario/hookstorm/actions/workflows/ci.yml)
 
 Webhook providers promise **at-least-once, unordered** delivery. Most handlers are written and tested as if delivery were exactly-once and in order. The gap shows up in production as double charges, refunds overwritten by late "paid" events, and events lost because the handler said `200` before doing the work. Tools like Svix and Hookdeck make _sending_ webhooks reliable. Hookstorm tests whether your _receiver_ is correct when delivery isn't.
 
@@ -11,7 +11,7 @@ Webhook providers promise **at-least-once, unordered** delivery. Most handlers a
 The repo has a small wallet top-up service in two versions. [`examples/buggy-receiver`](examples/buggy-receiver/server.mjs) is written the way webhook handlers often are. [`examples/fixed-receiver`](examples/fixed-receiver/server.mjs) is the same service with standard fixes. Both receive Paystack-style `charge.success` and `refund.processed` events.
 
 ```bash
-git clone https://github.com/OWNER/hookstorm && cd hookstorm
+git clone https://github.com/vyktoremario/hookstorm && cd hookstorm
 npm ci && npm run build
 npm run demo
 ```

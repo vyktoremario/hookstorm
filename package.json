@@ -64,5 +64,13 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.73.0",
     "vitest": "^5.1.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vyktoremario/hookstorm.git"
+  },
+  "homepage": "https://github.com/vyktoremario/hookstorm#readme",
+  "bugs": {
+    "url": "https://github.com/vyktoremario/hookstorm/issues"
   }
 }
