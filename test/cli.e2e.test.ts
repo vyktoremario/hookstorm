@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, describe, expect, it } from 'vitest';
-import { freePort, startExample } from './helpers.js';
+import { fakeReceiver, freePort, startExample } from './helpers.js';
+import { writeFile } from 'node:fs/promises';
 import type { ChildProcess } from 'node:child_process';
 
 const CLI = resolve('dist/cli.js');
@@ -93,5 +94,29 @@ describe.skipIf(!existsSync(CLI))('CLI (built)', () => {
     const xml = await readFile(join(dir, 'r.xml'), 'utf8');
     expect(xml).toMatch(/<testsuites name="hookstorm" tests="10" failures="\d+"/);
     expect(xml).toContain('<failure');
+  });
+
+  it('exits 2 and says inconclusive when the events change nothing; reads the secret from .env', async () => {
+    const rx = await fakeReceiver((req) => ({ status: req.headers['x-paystack-signature'] ? 200 : 401 }));
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'hookstorm-inconclusive-'));
+      await writeFile(join(dir, '.env'), 'HS_E2E_SECRET=sk_from_env\n');
+      await writeFile(
+        join(dir, 'hookstorm.config.ts'),
+        `import { defineConfig, custom } from 'hookstorm-cli';
+export default defineConfig({ target: '${rx.url}', provider: 'paystack', secret: process.env.HS_E2E_SECRET,
+  events: [{ body: { event: 'charge.success', data: { reference: 'r1' } } }], settleMs: 0,
+  probe: () => ({ unchanged: true }), invariants: [custom('holds', () => [])] });`,
+      );
+      const r = await cli(
+        ['run', '--runs', '2', '--seed', '1', '--sink-port', String(await freePort())],
+        dir,
+      );
+      expect(r.stdout).toContain('loaded');
+      expect(r.stdout).toMatch(/Inconclusive/);
+      expect(r.code).toBe(2);
+    } finally {
+      await rx.close();
+    }
   });
 });

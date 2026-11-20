@@ -115,6 +115,7 @@ export default defineConfig({
   profile: 'realistic', // gentle | realistic | hostile | { extends: 'hostile', duplicate: 0.8 }
   reset: '/hookstorm/reset', // paths resolve against target's origin
   probe: '/hookstorm/state',
+  ignoredEventTypes: ['payment_intent.created', 'charge.updated'], // delivered, but left out of timelines
   sink: { port: 4400, faults: { 'email.send': 0.2 } }, // make downstream calls flaky on purpose
 
   invariants: [
@@ -161,8 +162,11 @@ Stripe and GitHub signatures are tested against the official `stripe` SDK and `@
 
 ```bash
 npx hookstorm record --provider stripe --port 4500 --forward http://localhost:3000/webhooks/stripe
-stripe listen --forward-to localhost:4500
+stripe listen --api-key "$STRIPE_SECRET_KEY" --forward-to localhost:4500 \
+  --events payment_intent.succeeded,charge.refunded   # the types your app handles, plus any you want as noise
 ```
+
+Current Stripe CLI versions need an `--events` list (or `--all-snapshot`). `--api-key` makes the CLI listen on the same Stripe account as your app's key. If they differ, no events arrive and nothing tells you why.
 
 The recorder saves each body byte-for-byte, drops signature headers (replays are re-signed), skips Stripe `livemode: true` events, and forwards the original request unchanged, so your app keeps working while you record.
 
@@ -171,11 +175,14 @@ The recorder saves each body byte-for-byte, drops signature headers (replays are
 ```text
 hookstorm run   [-c hookstorm.config.ts] [--target url] [--seed n] [--runs 10] [--profile realistic]
                 [--timeout ms] [--settle ms] [--sink-port 4400] [--json report.json] [--junit report.xml] [-q]
+                [--env-file .env | --no-env-file] [--full-timeline]
 hookstorm init  [--provider stripe|paystack|github|custom] [--target url]
 hookstorm record --provider <name> [--port 4500] [--forward url] [-o hookstorm.events.jsonl]
 ```
 
-Exit codes: `0` all invariants held, `1` violations found, `2` config error or target unreachable.
+Exit codes: `0` all invariants held, `1` violations found, `2` config error, target unreachable, or **inconclusive** (every run warned that the events had no visible effect, so nothing was really tested).
+
+`hookstorm run` loads `.env` next to the config by default, so `secret: process.env.…` matches what your app uses. Variables already set in the shell win.
 
 ### In CI
 

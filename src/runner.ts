@@ -1,4 +1,5 @@
 import net from 'node:net';
+import { isDeepStrictEqual } from 'node:util';
 import type { ResolvedConfig } from './config.js';
 import { buildPlan } from './scenario.js';
 import { executePlan, sleep } from './simulator.js';
@@ -22,7 +23,15 @@ export interface RunResult {
   durationMs: number;
   /** Set when the target could not be reached at all. */
   fatal?: string;
+  /** Things that make this run's result untrustworthy, e.g. the events had no visible effect. */
+  warnings: string[];
 }
+
+/** A warning raised when nothing the app did could be observed, so passing rules prove nothing. */
+export const NO_EFFECT_WARNING =
+  'the events had no visible effect: no sink calls, and the probe state after the run equals the state right after reset. ' +
+  'Rules that look at effects pass without testing anything. Common causes: reset removes the rows the events refer to ' +
+  '(seed them instead), the handler ignores these event types, or side effects are not pointed at the sink.';
 
 export interface SuiteResult {
   config: ResolvedConfig;
@@ -30,6 +39,8 @@ export interface SuiteResult {
   /** Invariant names that were violated at least once. */
   failedInvariants: string[];
   passed: boolean;
+  /** Every run raised the no-effect warning: the suite tested nothing, so it is not a pass. */
+  inconclusive: boolean;
   durationMs: number;
 }
 
@@ -60,7 +71,7 @@ export async function runOnce(cfg: ResolvedConfig, sink: SinkServer, seed: numbe
     seed,
     maxAttempts: cfg.maxAttempts,
   });
-  const empty = { seed, plan, deliveries: [], sink: [], state: undefined, violations: [] };
+  const empty = { seed, plan, deliveries: [], sink: [], state: undefined, violations: [], warnings: [] };
 
   try {
     await callHook(cfg.reset, 'POST');
@@ -71,6 +82,10 @@ export async function runOnce(cfg: ResolvedConfig, sink: SinkServer, seed: numbe
       fatal: `reset failed: ${(e as Error).message}`,
     };
   }
+
+  // State right after reset, to tell whether the events changed anything at all.
+  let baseline: unknown;
+  if (cfg.probe !== undefined) baseline = await callHook(cfg.probe, 'GET').catch(() => undefined);
 
   const t0 = performance.now();
   sink.reset(seed, t0);
@@ -131,6 +146,7 @@ export async function runOnce(cfg: ResolvedConfig, sink: SinkServer, seed: numbe
     sink: sinkCalls,
     state,
     violations,
+    warnings: runWarnings(cfg, deliveries, sinkCalls, baseline, state),
     durationMs: performance.now() - started,
   };
 }
@@ -161,6 +177,38 @@ export function checkReachable(target: string, timeoutMs = 5000): Promise<void> 
   });
 }
 
+function runWarnings(
+  cfg: ResolvedConfig,
+  deliveries: DeliveryRecord[],
+  sinkCalls: SinkCall[],
+  baseline: unknown,
+  state: unknown,
+): string[] {
+  const warnings: string[] = [];
+  const attempts = deliveries.flatMap((d) => d.attempts);
+  const answered = attempts.filter((a) => a.status !== undefined);
+
+  if (!deliveries.some((d) => d.acked)) {
+    const statuses = [...new Set(answered.map((a) => a.status))].join(', ');
+    warnings.push(
+      `no delivery was acknowledged${statuses ? ` (the app answered ${statuses})` : ''}. ` +
+        'A 400/401 usually means the signing secret does not match the one the app verifies with.',
+    );
+    return warnings;
+  }
+
+  const sinkUsed = sinkCalls.some((c) => c.ok);
+  const stateChanged = cfg.probe !== undefined && state !== undefined && !isDeepStrictEqual(baseline, state);
+  if (!sinkUsed && !stateChanged) {
+    warnings.push(
+      cfg.probe === undefined
+        ? 'nothing was observed: no sink calls, and no probe is configured. Point side effects at the sink or add a probe.'
+        : NO_EFFECT_WARNING,
+    );
+  }
+  return warnings;
+}
+
 export async function runSuite(
   cfg: ResolvedConfig,
   seeds: number[],
@@ -189,11 +237,13 @@ export async function runSuite(
     await sink.stop();
   }
   const failedInvariants = [...new Set(runs.flatMap((r) => r.violations.map((v) => v.invariant)))];
+  const inconclusive = runs.length > 0 && runs.every((r) => r.warnings.length > 0);
   return {
     config: cfg,
     runs,
     failedInvariants,
-    passed: runs.every((r) => !r.fatal && r.violations.length === 0),
+    inconclusive,
+    passed: !inconclusive && runs.every((r) => !r.fatal && r.violations.length === 0),
     durationMs: performance.now() - started,
   };
 }

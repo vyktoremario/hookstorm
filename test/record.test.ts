@@ -36,3 +36,20 @@ describe('hookstorm record', () => {
     }
   });
 });
+
+describe('hookstorm record idle hint', () => {
+  it('prints a provider-specific hint when nothing arrives', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'hookstorm-idle-'));
+    const lines: string[] = [];
+    const rec = await startRecorder({
+      provider: 'stripe',
+      port: 0,
+      out: join(dir, 'e.jsonl'),
+      idleHintMs: 30,
+      log: (l) => lines.push(l),
+    });
+    await new Promise((r) => setTimeout(r, 80));
+    await rec.close();
+    expect(lines.join('\n')).toMatch(/No events yet.*--api-key/);
+  });
+});

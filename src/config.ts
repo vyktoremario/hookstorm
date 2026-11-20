@@ -35,6 +35,11 @@ export interface HookstormConfig {
   reset?: string | (() => unknown);
   /** Where to read the app's state after a run: a URL (GET, JSON) or a function. */
   probe?: string | (() => unknown);
+  /**
+   * Event types your app receives but doesn't act on (e.g. `payment_intent.created`). They are still delivered
+   * with faults, but left out of violation timelines so the cause is easier to see.
+   */
+  ignoredEventTypes?: string[];
   /** Business key of an event (e.g. payment reference). Used to show the timeline behind a violation. */
   eventKey?: (event: WebhookEvent) => string | number | undefined | null;
   invariants: Invariant[];
@@ -62,6 +67,7 @@ export interface ResolvedConfig {
   reset: HookstormConfig['reset'];
   probe: HookstormConfig['probe'];
   eventKey: (event: WebhookEvent) => string | undefined;
+  ignoredEventTypes: string[];
   invariants: Invariant[];
 }
 
@@ -82,6 +88,25 @@ function selfEntry(): string {
   const ext = extname(here); // .ts when running from source, .js from dist
   const candidates = [resolve(dirname(here), `index${ext}`), resolve(dirname(here), '../index.js')];
   return candidates.find((c) => existsSync(c)) ?? candidates[0]!;
+}
+
+/**
+ * Loads environment variables for the config, so `secret: process.env.X` can read the same `.env` the app uses.
+ * `envFile`: `undefined` = `.env` next to the config if it exists; a path = that file (must exist);
+ * `false` = load nothing. Variables already set in the shell always win. Returns the file loaded, if any.
+ */
+export function loadEnvForConfig(
+  configPath: string,
+  envFile: string | false | undefined,
+): string | undefined {
+  if (envFile === false) return undefined;
+  const path = envFile === undefined ? resolve(dirname(resolve(configPath)), '.env') : resolve(envFile);
+  if (!existsSync(path)) {
+    if (envFile !== undefined) throw new ConfigError(`env file not found: ${path}`);
+    return undefined;
+  }
+  process.loadEnvFile(path);
+  return path;
 }
 
 export async function loadConfigFile(path: string): Promise<HookstormConfig> {
@@ -168,6 +193,7 @@ export async function resolveConfig(
       const k = userKey ? userKey(e) : preset.eventKey(e);
       return k === undefined || k === null ? undefined : String(k);
     },
+    ignoredEventTypes: config.ignoredEventTypes ?? [],
     invariants: config.invariants,
   };
 }

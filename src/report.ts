@@ -35,18 +35,50 @@ function relatedEvents(v: Violation, suite: SuiteResult): Set<string> {
   return eventIds;
 }
 
-export function timeline(run: RunResult, v: Violation, suite: SuiteResult): string[] {
+/**
+ * Interleaves the deliveries and side effects behind a violation, in time order. Events whose type is in
+ * `ignoredEventTypes` (types the app doesn't handle) are left out unless `full` is set.
+ */
+export function timeline(
+  run: RunResult,
+  v: Violation,
+  suite: SuiteResult,
+  full = false,
+): { lines: string[]; hidden: number } {
   const cfg = suite.config;
-  const eventIds = relatedEvents(v, suite);
+  const named = new Set(v.eventIds ?? []);
+  const ignored = new Set(cfg.ignoredEventTypes);
   const typeOf = new Map(cfg.events.map((e) => [e.id, e.type]));
   const rows: Array<{ t: number; line: string }> = [];
-  for (const d of run.deliveries)
-    if (eventIds.has(d.eventId))
-      for (const a of d.attempts)
-        rows.push({ t: a.startedAt, line: attemptLine(a, typeOf.get(a.eventId) ?? '?') });
-  const calls = v.sinkCalls ?? [];
-  for (const c of calls) rows.push({ t: c.at, line: sinkLine(c) });
-  return rows.sort((a, b) => a.t - b.t).map((r) => r.line);
+  let hidden = 0;
+  for (const id of relatedEvents(v, suite)) {
+    if (!full && !named.has(id) && ignored.has(typeOf.get(id) ?? '')) {
+      hidden++;
+      continue;
+    }
+    for (const d of run.deliveries)
+      if (d.eventId === id)
+        for (const a of d.attempts)
+          rows.push({ t: a.startedAt, line: attemptLine(a, typeOf.get(id) ?? '?') });
+  }
+  for (const c of v.sinkCalls ?? []) rows.push({ t: c.at, line: sinkLine(c) });
+  return { lines: rows.sort((a, b) => a.t - b.t).map((r) => r.line), hidden };
+}
+
+/** Did two deliveries of the same related event have attempts in flight at the same time? */
+function overlapped(run: RunResult, eventIds: Set<string>): boolean {
+  for (const id of eventIds) {
+    const spans = run.deliveries
+      .filter((d) => d.eventId === id)
+      .map((d) =>
+        d.attempts.filter((a) => a.outcome !== 'notSent').map((a) => [a.startedAt, a.endedAt] as const),
+      );
+    for (let i = 0; i < spans.length; i++)
+      for (let j = i + 1; j < spans.length; j++)
+        for (const [s1, e1] of spans[i]!)
+          for (const [s2, e2] of spans[j]!) if (s1 < e2 && s2 < e1) return true;
+  }
+  return false;
 }
 
 export function rerunCommand(suite: SuiteResult, seed: number): string {
@@ -62,13 +94,28 @@ export function formatRunLine(r: RunResult, i: number, total: number): string {
   const summary = pc.dim(
     `${attempts.length} attempts: ${plan.duplicates} dup, ${plan.concurrent} concurrent, ${count('notSent')} dropped requests, ${count('responseDropped')} dropped responses, ${count('timedOut', 'aborted')} timeouts`,
   );
+  const warn = r.warnings.length ? `  ${pc.yellow('⚠ warning')}` : '';
   if (r.fatal) return `${n} seed ${r.seed}  ${pc.red('ERROR')} ${r.fatal}`;
-  if (r.violations.length === 0) return `${n} seed ${r.seed}  ${pc.green('pass')}  ${summary}`;
-  return `${n} seed ${r.seed}  ${pc.red(`${r.violations.length} violation(s)`)}  ${summary}`;
+  if (r.violations.length === 0) return `${n} seed ${r.seed}  ${pc.green('pass')}${warn}  ${summary}`;
+  return `${n} seed ${r.seed}  ${pc.red(`${r.violations.length} violation(s)`)}${warn}  ${summary}`;
+}
+
+/** Distinct warnings across runs, each with how many seeds raised it. */
+function formatWarnings(suite: SuiteResult): string[] {
+  const counts = new Map<string, number>();
+  for (const r of suite.runs) for (const w of r.warnings) counts.set(w, (counts.get(w) ?? 0) + 1);
+  if (counts.size === 0) return [];
+  const out = [pc.yellow(pc.bold('⚠ Warnings'))];
+  for (const [w, n] of counts)
+    out.push(`  ${pc.yellow(w)} ${pc.dim(`(${n}/${suite.runs.length} seed(s))`)}`, '');
+  return out;
 }
 
 /** Full human-readable report. Shows each distinct invariant once, with its first reproduction. */
-export function formatSuite(suite: SuiteResult, opts: { maxExamples?: number } = {}): string {
+export function formatSuite(
+  suite: SuiteResult,
+  opts: { maxExamples?: number; fullTimeline?: boolean } = {},
+): string {
   const out: string[] = [''];
   const failing = suite.runs.filter((r) => r.violations.length > 0);
   const fatal = suite.runs.find((r) => r.fatal);
@@ -77,7 +124,19 @@ export function formatSuite(suite: SuiteResult, opts: { maxExamples?: number } =
     out.push(pc.dim('  Is the receiver running, and does the target URL match?'));
     return out.join('\n');
   }
+  const warnings = formatWarnings(suite);
   if (failing.length === 0) {
+    if (suite.inconclusive) {
+      out.push(...warnings);
+      out.push(
+        pc.yellow(
+          pc.bold(
+            `⚠ Inconclusive: every run raised a warning, so the ${suite.config.invariants.length} invariants passing proves nothing`,
+          ),
+        ),
+      );
+      return out.join('\n');
+    }
     out.push(
       pc.green(
         pc.bold(
@@ -85,6 +144,7 @@ export function formatSuite(suite: SuiteResult, opts: { maxExamples?: number } =
         ),
       ) + pc.dim(` (${(suite.durationMs / 1000).toFixed(1)}s)`),
     );
+    if (warnings.length) out.push('', ...warnings);
     return out.join('\n');
   }
 
@@ -102,15 +162,23 @@ export function formatSuite(suite: SuiteResult, opts: { maxExamples?: number } =
     out.push(pc.dim(`  violated ${hits.length}× across ${seeds.length}/${suite.runs.length} seed(s)`));
     for (const { run, v } of hits.slice(0, opts.maxExamples ?? 1)) {
       out.push(`  ${v.message}  ${pc.dim(`(seed ${run.seed})`)}`);
-      const related = relatedEvents(v, suite);
-      const concurrent = run.plan.deliveries.some((d) => d.concurrentWith && related.has(d.eventId));
-      for (const line of timeline(run, v, suite)) out.push(`    ${line}`);
+      const { lines, hidden } = timeline(run, v, suite, opts.fullTimeline);
+      for (const line of lines) out.push(`    ${line}`);
+      if (hidden)
+        out.push(
+          pc.dim(`    (${hidden} related event(s) of ignored types hidden; --full-timeline shows them)`),
+        );
       out.push(pc.dim(`    reproduce: ${rerunCommand(suite, run.seed)}`));
-      if (concurrent)
-        out.push(pc.dim('    note: this plan includes concurrent deliveries; races may be timing-dependent'));
+      if (overlapped(run, relatedEvents(v, suite)))
+        out.push(
+          pc.dim(
+            '    note: two deliveries of the same event were in flight at once; a race may not fail on every rerun',
+          ),
+        );
     }
     out.push('');
   }
+  out.push(...warnings);
   out.push(
     pc.red(
       pc.bold(
@@ -125,6 +193,7 @@ export function toJson(suite: SuiteResult): object {
   return {
     tool: 'hookstorm',
     passed: suite.passed,
+    inconclusive: suite.inconclusive,
     target: suite.config.target,
     provider: suite.config.preset.name,
     profile: suite.config.profileName,
@@ -135,6 +204,7 @@ export function toJson(suite: SuiteResult): object {
       seed: r.seed,
       passed: !r.fatal && r.violations.length === 0,
       fatal: r.fatal,
+      warnings: r.warnings,
       durationMs: Math.round(r.durationMs),
       violations: r.violations.map((v) => ({ ...v, sinkCalls: v.sinkCalls?.map((c) => c.seq) })),
       plan: r.plan,
@@ -169,6 +239,14 @@ export function toJunit(suite: SuiteResult): string {
         );
       } else cases.push(`    <testcase classname="hookstorm" name="${name}"/>`);
     }
+  }
+  if (suite.inconclusive) {
+    // Exit code 2 says "nothing was tested"; make CI's test view say the same instead of all green.
+    failures++;
+    const msg = [...new Set(suite.runs.flatMap((r) => r.warnings))].join('\n');
+    cases.push(
+      `    <testcase classname="hookstorm" name="events had a visible effect"><failure message="inconclusive: every run raised a warning">${xml(msg)}</failure></testcase>`,
+    );
   }
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',

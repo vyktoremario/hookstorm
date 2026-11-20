@@ -83,9 +83,14 @@ Three ways to get them:
 - **Stripe**, with no tunnel needed:
   ```bash
   npx hookstorm record --provider stripe --port 4500 --forward http://localhost:3000/webhooks/stripe
-  stripe listen --forward-to localhost:4500        # in a second terminal; prints your whsec_ secret
-  stripe trigger payment_intent.succeeded          # in a third
+  # in a second terminal (prints the whsec_ secret your app must verify with):
+  stripe listen --api-key "$STRIPE_SECRET_KEY" --forward-to localhost:4500 \
+    --events payment_intent.created,payment_intent.succeeded,charge.succeeded,charge.refunded
   ```
+  Then use your app's own flow (checkout, refund) in test mode, so the events refer to your app's real records.
+  - **`--events` is required** by current Stripe CLI versions. List the "snapshot" event types you want, or use `--all-snapshot`. Avoid `--all-thin`: thin events have a different payload.
+  - **`--api-key` matters.** Without it, the CLI listens on the account it's signed in to. If your app's key belongs to another account or sandbox, its payments happen there and no events arrive. The recorder prints a hint if nothing arrives within 30 seconds.
+  - **`stripe trigger …` events don't carry your app's metadata** (order ids and so on), so your handler will usually ignore them. Hookstorm then warns that the events had no visible effect.
 
 ## 3. Let Hookstorm see what your app did
 
@@ -100,6 +105,12 @@ Add two test-only routes to your app and mount them only when `NODE_ENV=test`. Y
 if (process.env.NODE_ENV === 'test') {
   app.post('/hookstorm/reset', async (_req, res) => {
     await db.query('TRUNCATE ledger_entries, orders RESTART IDENTITY CASCADE');
+    // Recreate the rows the events refer to, as they were before any webhook arrived (see "Seed" below).
+    for (const o of seed.orders)
+      await db.query(`INSERT INTO orders (id, payment_intent_id, status) VALUES ($1, $2, 'pending')`, [
+        o.id,
+        o.payment_intent_id,
+      ]);
     res.sendStatus(204);
   });
   app.get('/hookstorm/state', async (_req, res) => {
@@ -135,6 +146,24 @@ sink: { port: 4400, faults: { 'payments.charge': 0.1, 'email.send': 0.3 } },
 A failed call counts as not having happened. Each logical call fails at most twice in a row, so a correct retry strategy always gets through eventually.
 
 The [demo receivers](../examples) use both options.
+
+### Seed the records your events refer to
+
+Real events refer to things that already exist in your app: an order created at checkout, a customer, a subscription. If `reset` only empties the tables, every replayed event points at a record that doesn't exist. Most handlers then log "unknown order", answer 200, and do nothing, and **every rule passes without testing anything**.
+
+So `reset` must recreate those records as they were _before_ the webhooks arrived:
+
+1. Record events while driving your app's real flow (checkout, refund…), as in step 2.
+2. Export the records those events refer to into a seed file, and reset them to their pre-webhook state (e.g. status `pending`, no ledger rows). A small script that `SELECT`s the orders that have a payment intent is enough.
+3. In `reset`, empty the tables and insert the seed.
+
+Hookstorm also checks this for you. When a probe is configured, it reads the state right after `reset` and again after the run. If they're identical and nothing called the sink, the run gets a warning:
+
+```text
+⚠ the events had no visible effect: no sink calls, and the probe state after the run equals the state right after reset…
+```
+
+If every run gets a warning, the result is **inconclusive**, not a pass: `hookstorm run` exits with code 2, and the JUnit report has a failing "events had a visible effect" test.
 
 ## 4. Write invariants
 
@@ -182,11 +211,16 @@ Each line is one seed. For each broken rule you get the first failing example, t
     reproduce: hookstorm run -c hookstorm.config.ts --target http://localhost:3000/webhooks --seed 1834 --runs 1
 ```
 
+One bug can break more than one rule. For example, a duplicate receipt breaks both `atMostOnce` and `exactlyOnce` (which also flags duplicates), so it's counted under each. Look at the timelines rather than the total.
+
+If your app receives event types it doesn't act on (Stripe sends `payment_intent.created`, `charge.updated`…), list them in `ignoredEventTypes`. They're still delivered with faults, but left out of timelines so the cause stands out. `--full-timeline` shows everything.
+
 Useful flags:
 
 - `--profile gentle|realistic|hostile`: how much chaos.
 - `--timeout <ms>`: per-attempt response timeout. The default is 1000, stricter than real providers on purpose, to catch slow work done before the response.
 - `--settle <ms>`: how long to wait for background work before reading state. The default is 500. Raise it if your app processes webhooks on a queue.
+- `--env-file <path>`: Hookstorm loads `.env` next to the config by default, so `secret: process.env.STRIPE_WEBHOOK_SECRET` matches what your app uses. Use this flag to pick another file, or `--no-env-file` to load none. Variables already set in your shell always win.
 
 ### What to do with a failure
 
@@ -212,6 +246,8 @@ The exit code is `1` when an invariant breaks and `2` when the config is wrong o
 
 ## Troubleshooting
 
+- **Everything passes, with "⚠ the events had no visible effect":** your app ignored the events. The usual cause is that `reset` doesn't recreate the records the events refer to; see "Seed the records your events refer to".
+- **"⚠ no delivery was acknowledged":** your app rejected every attempt, usually with a 400/401 because of a signing secret mismatch.
 - **Every attempt is `rejected 401`:** the signature doesn't match. Check that `secret` is the one your app verifies with, and that `sign` uses the same header and algorithm.
 - **`could not reach …`:** the app isn't listening on `target`, or `target` points at the wrong port or path.
 - **Rules fail even against a correct app:** the state was read too early (raise `--settle`), or `reset` doesn't clear everything the rule reads.

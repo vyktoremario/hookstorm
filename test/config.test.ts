@@ -67,3 +67,25 @@ export default defineConfig({ target: 'http://127.0.0.1:1/x', provider: 'stripe'
     await expect(loadConfigFile('/nope/hookstorm.config.ts')).rejects.toThrow(/Config not found/);
   });
 });
+
+describe('loadEnvForConfig', () => {
+  it('loads .env next to the config by default, without overriding the shell', async () => {
+    const { loadEnvForConfig } = await import('../src/config.js');
+    const dir = await mkdtemp(join(tmpdir(), 'hookstorm-env-'));
+    await writeFile(join(dir, '.env'), 'HS_TEST_A=file\nHS_TEST_B=file\n');
+    process.env.HS_TEST_A = 'shell';
+    try {
+      expect(loadEnvForConfig(join(dir, 'hookstorm.config.ts'), undefined)).toBe(join(dir, '.env'));
+      expect(process.env.HS_TEST_A).toBe('shell');
+      expect(process.env.HS_TEST_B).toBe('file');
+      expect(loadEnvForConfig(join(dir, 'hookstorm.config.ts'), false)).toBeUndefined();
+      expect(() => loadEnvForConfig(join(dir, 'x.ts'), join(dir, 'missing.env'))).toThrow(
+        /env file not found/,
+      );
+      expect(loadEnvForConfig(join(tmpdir(), 'nowhere', 'x.ts'), undefined)).toBeUndefined();
+    } finally {
+      delete process.env.HS_TEST_A;
+      delete process.env.HS_TEST_B;
+    }
+  });
+});
