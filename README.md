@@ -3,6 +3,7 @@
 **Chaos-test your webhook _receivers_.** Hookstorm plays the webhook provider. It delivers your events with duplicates, reordering, delays, dropped requests, dropped responses and timeouts, retrying the way Stripe, Paystack or GitHub would. Then it checks your business rules ("each payment is credited at most once", "a refunded order stays refunded") and tells you which ones broke, with a seed that reproduces the failure.
 
 [![CI](https://github.com/vyktoremario/hookstorm/actions/workflows/ci.yml/badge.svg)](https://github.com/vyktoremario/hookstorm/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/hookstorm-cli)](https://www.npmjs.com/package/hookstorm-cli)
 
 Webhook providers promise **at-least-once, unordered** delivery. Most handlers are written and tested as if delivery were exactly-once and in order. The gap shows up in production as double charges, refunds overwritten by late "paid" events, and events lost because the handler said `200` before doing the work. Tools like Svix and Hookdeck make _sending_ webhooks reliable. Hookstorm tests whether your _receiver_ is correct when delivery isn't.
 
