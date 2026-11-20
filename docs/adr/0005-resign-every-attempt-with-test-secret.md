@@ -1,6 +1,6 @@
 # ADR-0005: Re-sign every attempt with the user's test secret, using raw bytes
 
-- Status: Proposed
+- Status: Accepted (2026-11-20)
 - Date: 2026-11-20
 
 ## Context
@@ -23,5 +23,5 @@ Real receivers verify signatures. Replayed, duplicated or delayed events must st
 ## Consequences
 
 - Receivers run their real verification code unchanged.
-- Hookstorm can't prove the app rejects *real* forged requests unless asked to. A `badSignature`/`staleSignature` fault is a stretch goal for that.
+- Hookstorm can't prove the app rejects _real_ forged requests unless asked to. A `badSignature`/`staleSignature` fault is a stretch goal for that.
 - Providers with asymmetric signatures (e.g. ed25519, if a preset ever needs one) would need a test key pair configured in the app. That's out of scope for v1 presets.

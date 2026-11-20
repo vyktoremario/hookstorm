@@ -1,11 +1,11 @@
 # ADR-0002: Observe the app through a side-effect sink and a state probe
 
-- Status: Proposed
+- Status: Accepted (2026-11-20)
 - Date: 2026-11-20
 
 ## Context
 
-To say "the customer was charged twice", Hookstorm has to see what the app *did*, not just what HTTP status it returned. Options:
+To say "the customer was charged twice", Hookstorm has to see what the app _did_, not just what HTTP status it returned. Options:
 
 1. **Read the app's database.** This couples Hookstorm to the schema and DB engine, and needs credentials.
 2. **Instrument the app** with an SDK/agent (monkey-patching fetch, ORM hooks). This is invasive, language-specific and brittle.

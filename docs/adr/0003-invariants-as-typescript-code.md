@@ -1,6 +1,6 @@
 # ADR-0003: Invariants are TypeScript code with helper functions, not a YAML DSL
 
-- Status: Proposed
+- Status: Accepted (2026-11-20)
 - Date: 2026-11-20
 
 ## Context

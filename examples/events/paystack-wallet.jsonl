@@ -1,0 +1,7 @@
+// Paystack-shaped sample events (simplified payloads) for the wallet top-up demo.
+{"id":"charge_ada_1","body":"{\"event\":\"charge.success\",\"data\":{\"id\":5001,\"reference\":\"ref_ada_1\",\"amount\":500000,\"currency\":\"NGN\",\"status\":\"success\",\"customer\":{\"email\":\"ada@example.com\"}}}"}
+{"id":"charge_bola_1","body":"{\"event\":\"charge.success\",\"data\":{\"id\":5002,\"reference\":\"ref_bola_1\",\"amount\":250000,\"currency\":\"NGN\",\"status\":\"success\",\"customer\":{\"email\":\"bola@example.com\"}}}"}
+{"id":"refund_ada_1","body":"{\"event\":\"refund.processed\",\"data\":{\"transaction_reference\":\"ref_ada_1\",\"amount\":500000,\"currency\":\"NGN\",\"status\":\"processed\",\"customer\":{\"email\":\"ada@example.com\"}}}"}
+{"id":"charge_chidi_1","body":"{\"event\":\"charge.success\",\"data\":{\"id\":5003,\"reference\":\"ref_chidi_1\",\"amount\":120000,\"currency\":\"NGN\",\"status\":\"success\",\"customer\":{\"email\":\"chidi@example.com\"}}}"}
+{"id":"charge_ada_2","body":"{\"event\":\"charge.success\",\"data\":{\"id\":5004,\"reference\":\"ref_ada_2\",\"amount\":75000,\"currency\":\"NGN\",\"status\":\"success\",\"customer\":{\"email\":\"ada@example.com\"}}}"}
+{"id":"refund_chidi_1","body":"{\"event\":\"refund.processed\",\"data\":{\"transaction_reference\":\"ref_chidi_1\",\"amount\":120000,\"currency\":\"NGN\",\"status\":\"processed\",\"customer\":{\"email\":\"chidi@example.com\"}}}"}

@@ -1,11 +1,11 @@
 # ADR-0001: Simulate provider delivery (replay-first) instead of an inline live proxy
 
-- Status: Proposed
+- Status: Accepted (2026-11-20)
 - Date: 2026-11-20
 
 ## Context
 
-The obvious design is a man-in-the-middle proxy: the provider sends to Hookstorm, and Hookstorm forwards to the app while injecting faults. To trigger retries, the proxy would drop or delay the app's response to the *real* provider.
+The obvious design is a man-in-the-middle proxy: the provider sends to Hookstorm, and Hookstorm forwards to the app while injecting faults. To trigger retries, the proxy would drop or delay the app's response to the _real_ provider.
 
 That has serious problems:
 
@@ -23,5 +23,5 @@ Hookstorm **plays the provider itself**. Events come from a JSONL fixture: recor
 
 - Runs take seconds, are reproducible (ADR-0004), and need no network or account. That makes them suitable for CI.
 - Hookstorm must model each provider's delivery semantics correctly (attempts, timeouts, success codes). Presets have to cite their sources and be kept up to date.
-- Hookstorm can't catch bugs that depend on the provider's exact real timing. This is accepted, because correctness bugs depend on *ordering and multiplicity*, not wall-clock time.
+- Hookstorm can't catch bugs that depend on the provider's exact real timing. This is accepted, because correctness bugs depend on _ordering and multiplicity_, not wall-clock time.
 - An inline live-proxy mode stays possible later (v1.1+) by reusing the scenario engine and signers.
