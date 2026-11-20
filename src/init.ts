@@ -166,6 +166,14 @@ export async function runInit(
   const eventsPath = resolve(dir, 'hookstorm.events.jsonl');
   for (const p of [configPath, eventsPath]) if (existsSync(p)) throw new ConfigError(`${p} already exists`);
   await writeFile(configPath, configTemplate(provider, target));
-  await writeFile(eventsPath, SAMPLE_EVENTS[provider].map((e) => JSON.stringify(e)).join('\n') + '\n');
+  const header = [
+    '// Sample events showing the format only: their ids and fields will not match your app.',
+    '// Replace them with real ones from test mode: npx hookstorm record --provider ' +
+      `${provider} --port 4500 --forward <your webhook URL> -o hookstorm.events.jsonl`,
+  ];
+  await writeFile(
+    eventsPath,
+    [...header, ...SAMPLE_EVENTS[provider].map((e) => JSON.stringify(e))].join('\n') + '\n',
+  );
   return [configPath, eventsPath];
 }

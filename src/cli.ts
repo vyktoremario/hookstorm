@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { Command, InvalidArgumentError, Option } from 'commander';
 import pc from 'picocolors';
-import { ConfigError, loadConfigFile, resolveConfig } from './config.js';
+import { ConfigError, loadConfigFile, loadEnvForConfig, resolveConfig } from './config.js';
 import { runInit } from './init.js';
 import type { ProviderName } from './presets.js';
 import type { ProfileName } from './profiles.js';
@@ -35,18 +35,28 @@ program
   .command('run')
   .description('deliver events with injected faults and check your invariants')
   .option('-c, --config <path>', 'config file', 'hookstorm.config.ts')
+  .option('--env-file <path>', 'load environment variables from this file (default: .env next to the config)')
+  .option('--no-env-file', 'do not load any .env file')
   .option('-t, --target <url>', 'override the target URL')
   .option('-s, --seed <n>', 'first seed (default: random)', int('seed'))
   .option('-n, --runs <n>', 'number of seeds to try', int('runs'), 10)
+  .option(
+    '--repeat-seed <n>',
+    'run each seed n times: same plan, so a seed failing only some of the time points to a race',
+    int('repeat-seed'),
+    1,
+  )
   .addOption(new Option('-p, --profile <name>', 'fault profile').choices(['gentle', 'realistic', 'hostile']))
   .option('--timeout <ms>', 'per-attempt response timeout', int('timeout'))
   .option('--settle <ms>', 'wait before probing state', int('settle'))
   .option('--sink-port <port>', 'sink port', int('sink-port'))
   .option('--json <path>', 'write a JSON report')
   .option('--junit <path>', 'write a JUnit XML report')
+  .option('--full-timeline', 'include ignoredEventTypes in violation timelines')
   .option('--examples <n>', 'example violations to show per invariant', int('examples'), 1)
   .option('-q, --quiet', 'only print the final report')
   .action(async (opts) => {
+    const envFile = loadEnvForConfig(opts.config, opts.envFile === true ? undefined : opts.envFile);
     const config = await loadConfigFile(opts.config);
     const cfg = await resolveConfig(config, opts.config, {
       target: opts.target,
@@ -56,28 +66,32 @@ program
       sinkPort: opts.sinkPort,
     });
     const base = opts.seed ?? randomSeed();
-    const seeds = seedsFor(base, Math.max(1, opts.runs));
+    const repeat = Math.max(1, opts.repeatSeed);
+    const seeds = seedsFor(base, opts.runs, repeat);
     if (!opts.quiet) {
       console.log(
         pc.bold('hookstorm') +
           pc.dim(
-            ` v${VERSION} · ${cfg.preset.name} → ${cfg.target} · profile ${cfg.profileName} · ${cfg.events.length} events · ${seeds.length} seed(s) from ${base}`,
+            ` v${VERSION} · ${cfg.preset.name} → ${cfg.target} · profile ${cfg.profileName} · ${cfg.events.length} events · ${repeat > 1 ? `${seeds.length / repeat} seed(s) × ${repeat} runs` : `${seeds.length} seed(s)`} from ${base}`,
           ),
       );
+      if (envFile) console.log(pc.dim(`loaded ${envFile}`));
       console.log(pc.dim(`sink listening on http://${cfg.sinkHost}:${cfg.sinkPort}/sink/<effect>\n`));
     }
     const suite = await runSuite(cfg, seeds, {
       onRunEnd: (r, i, total) => {
-        if (!opts.quiet) console.log(formatRunLine(r, i, total));
+        if (!opts.quiet) console.log(formatRunLine(r, i, total, repeat));
       },
     });
-    console.log(formatSuite(suite, { maxExamples: opts.examples }));
+    console.log(formatSuite(suite, { maxExamples: opts.examples, fullTimeline: opts.fullTimeline }));
     if (opts.json)
       console.log(
         pc.dim(`JSON report: ${await writeOut(opts.json, JSON.stringify(toJson(suite), null, 2))}`),
       );
     if (opts.junit) console.log(pc.dim(`JUnit report: ${await writeOut(opts.junit, toJunit(suite))}`));
-    process.exitCode = suite.runs.some((r) => r.fatal) ? 2 : suite.passed ? 0 : 1;
+    // 2: could not test (fatal, or every run inconclusive); 1: a rule broke; 0: all rules held.
+    const violated = suite.runs.some((r) => r.violations.length > 0);
+    process.exitCode = suite.runs.some((r) => r.fatal) ? 2 : violated ? 1 : suite.inconclusive ? 2 : 0;
   });
 
 program
@@ -93,7 +107,10 @@ program
     const files = await runInit(opts.provider as ProviderName, opts.target);
     for (const f of files) console.log(`${pc.green('created')} ${f}`);
     console.log(
-      `\nNext: point your app's side effects at the sink, edit the invariants, then run ${pc.bold('hookstorm run')}`,
+      `\nNext:\n  1. Replace the sample events with real ones: ${pc.bold('hookstorm record --help')}\n` +
+        `  2. Let Hookstorm see what your app does (sink and/or probe), and seed the rows your events refer to\n` +
+        `  3. Edit the invariants, then run ${pc.bold('hookstorm run')}\n` +
+        `Guide: https://github.com/vyktoremario/hookstorm/blob/main/docs/guide-your-own-receiver.md`,
     );
   });
 
@@ -118,7 +135,12 @@ program
     });
     console.log(`${pc.bold('hookstorm record')} listening on ${rec.url} → ${resolve(opts.out)}`);
     if (opts.forward) console.log(pc.dim(`forwarding to ${opts.forward}`));
-    if (opts.provider === 'stripe') console.log(pc.dim(`e.g. stripe listen --forward-to ${rec.url}`));
+    if (opts.provider === 'stripe')
+      console.log(
+        pc.dim(
+          `e.g. stripe listen --api-key "$STRIPE_SECRET_KEY" --forward-to ${rec.url} --events payment_intent.succeeded,charge.refunded`,
+        ),
+      );
     console.log(pc.dim('Ctrl+C to stop'));
     process.on('SIGINT', () => void rec.close().then(() => process.exit(0)));
   });

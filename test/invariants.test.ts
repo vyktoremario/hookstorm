@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { atMostOnce, custom, exactlyOnce, finalState, monotonic } from '../src/invariants.js';
+import {
+  atMostOnce,
+  custom,
+  eventsTakeEffect,
+  exactlyOnce,
+  finalState,
+  monotonic,
+} from '../src/invariants.js';
 import { call, events, observations } from './helpers.js';
 
 const byRef = (c: { body: unknown }) => (c.body as { ref: string }).ref;
@@ -128,5 +135,106 @@ describe('custom', () => {
   });
   it('treats no return value as a pass', async () => {
     expect(await custom('ok', () => undefined).check(observations({}))).toEqual([]);
+  });
+});
+
+describe('eventsTakeEffect', () => {
+  const evs = events(
+    { type: 'paid', order: 'o1' },
+    { type: 'paid', order: 'o2' },
+    { type: 'paid', order: 'o3' },
+    { type: 'noise', order: 'o1' },
+  );
+  const byProbe = eventsTakeEffect({
+    forEachEvent: 'paid',
+    eventKey: (e) => (e.json as { order: string }).order,
+    record: (state, id) => state.orders.find((o: { id: string }) => o.id === id),
+  });
+  const baseline = {
+    orders: [
+      { id: 'o1', status: 'pending' },
+      { id: 'o2', status: 'pending' },
+    ],
+  };
+
+  it('passes when every acknowledged event changed its record', async () => {
+    const state = {
+      orders: [
+        { id: 'o1', status: 'paid' },
+        { id: 'o2', status: 'paid' },
+      ],
+    };
+    const obs = observations({ events: evs.slice(0, 2), baseline, state });
+    expect(await byProbe.check(obs)).toEqual([]);
+  });
+
+  it('flags an event whose record was never seeded, and one that changed nothing', async () => {
+    const state = {
+      orders: [
+        { id: 'o1', status: 'paid' },
+        { id: 'o2', status: 'pending' },
+      ],
+    };
+    const v = await byProbe.check(observations({ events: evs, baseline, state }));
+    expect(v.map((x) => [x.key, x.message])).toEqual([
+      ['o2', 'paid for o2 was acknowledged but changed nothing'],
+      [
+        'o3',
+        "paid for o3 was acknowledged, but o3 doesn't exist: seed it in reset, or the event can't be tested",
+      ],
+    ]);
+  });
+
+  it('ignores events the provider never got a success for', async () => {
+    const obs = observations({
+      events: evs,
+      acked: ['e1'],
+      baseline,
+      state: { orders: [{ id: 'o1', status: 'paid' }] },
+    });
+    expect(await byProbe.check(obs)).toEqual([]);
+  });
+
+  it('needs probe snapshots in probe mode', async () => {
+    expect((await byProbe.check(observations({ events: evs })))[0]!.message).toMatch(/configure `probe`/);
+  });
+
+  it('accepts several event types', async () => {
+    const both = eventsTakeEffect({
+      forEachEvent: ['paid', 'noise'],
+      eventKey: (e) => (e.json as { order: string }).order,
+      record: (state, id) => state.orders.find((o: { id: string }) => o.id === id),
+    });
+    const state = {
+      orders: [
+        { id: 'o1', status: 'paid' },
+        { id: 'o2', status: 'paid' },
+      ],
+    };
+    const v = await both.check(observations({ events: [evs[0]!, evs[3]!], baseline, state }));
+    expect(v).toEqual([]);
+    expect(both.name).toBe('every acknowledged paid / noise event takes effect');
+  });
+
+  it('sink mode: requires the effect for each acknowledged event', async () => {
+    const bySink = eventsTakeEffect({
+      forEachEvent: 'paid',
+      eventKey: (e) => (e.json as { order: string }).order,
+      effect: 'ship',
+      key: (c) => c.body.order,
+    });
+    const obs = observations({
+      events: evs.slice(0, 2),
+      sink: [call(1, 'ship', { order: 'o1' }), call(2, 'ship', { order: 'o2' }, false)],
+    });
+    const v = await bySink.check(obs);
+    expect(v.map((x) => x.message)).toEqual(['paid for o2 was acknowledged but ship never happened']);
+  });
+
+  it('rejects ambiguous options', () => {
+    expect(() => eventsTakeEffect({ forEachEvent: 'x', eventKey: () => 'k' })).toThrow(/either `record`/);
+    expect(() => eventsTakeEffect({ forEachEvent: 'x', eventKey: () => 'k', effect: 'e' })).toThrow(
+      /needs `key`/,
+    );
   });
 });

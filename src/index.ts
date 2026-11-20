@@ -1,7 +1,13 @@
 export { defineConfig } from './config.js';
 export type { HookstormConfig, ResolvedConfig, ConfigOverrides } from './config.js';
-export { atMostOnce, exactlyOnce, monotonic, finalState, custom } from './invariants.js';
-export type { CallKey, EventKey, ExactlyOnceOptions, MonotonicOptions } from './invariants.js';
+export { atMostOnce, exactlyOnce, monotonic, finalState, custom, eventsTakeEffect } from './invariants.js';
+export type {
+  CallKey,
+  EventKey,
+  EventsTakeEffectOptions,
+  ExactlyOnceOptions,
+  MonotonicOptions,
+} from './invariants.js';
 export { loadConfigFile, resolveConfig } from './config.js';
 export { runSuite, runOnce, seedsFor, checkReachable, UnreachableError } from './runner.js';
 export type { RunResult, SuiteResult } from './runner.js';

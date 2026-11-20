@@ -41,6 +41,15 @@ describe('hookstorm init', () => {
     expect(v.map((x) => x.message)).toEqual(['a has 2 ledger entries']);
   });
 
+  it('marks the sample events as samples, and they still load', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { loadEventsFile } = await import('../src/events.js');
+    const dir = await mkdtemp(join(tmpdir(), 'hookstorm-init-hdr-'));
+    const [, eventsPath] = await runInit('stripe', 'http://x', dir);
+    expect((await readFile(eventsPath!, 'utf8')).startsWith('// Sample events')).toBe(true);
+    expect((await loadEventsFile(eventsPath!)).length).toBe(2);
+  });
+
   it('refuses to overwrite', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'hookstorm-init-twice-'));
     await runInit('stripe', 'http://x', dir);

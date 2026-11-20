@@ -35,6 +35,11 @@ export interface HookstormConfig {
   reset?: string | (() => unknown);
   /** Where to read the app's state after a run: a URL (GET, JSON) or a function. */
   probe?: string | (() => unknown);
+  /**
+   * Event types your app receives but doesn't act on (e.g. `payment_intent.created`). They are still delivered
+   * with faults, but left out of violation timelines so the cause is easier to see.
+   */
+  ignoredEventTypes?: string[];
   /** Business key of an event (e.g. payment reference). Used to show the timeline behind a violation. */
   eventKey?: (event: WebhookEvent) => string | number | undefined | null;
   invariants: Invariant[];
@@ -62,6 +67,7 @@ export interface ResolvedConfig {
   reset: HookstormConfig['reset'];
   probe: HookstormConfig['probe'];
   eventKey: (event: WebhookEvent) => string | undefined;
+  ignoredEventTypes: string[];
   invariants: Invariant[];
 }
 
@@ -76,12 +82,70 @@ export interface ConfigOverrides {
 
 export class ConfigError extends Error {}
 
+const KNOWN_KEYS = [
+  'target',
+  'provider',
+  'secret',
+  'sign',
+  'events',
+  'profile',
+  'maxAttempts',
+  'backoffMs',
+  'timeoutMs',
+  'settleMs',
+  'sink',
+  'reset',
+  'probe',
+  'ignoredEventTypes',
+  'eventKey',
+  'invariants',
+] as const satisfies ReadonlyArray<keyof HookstormConfig>;
+
+function editDistance(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array<number>(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0]![j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      d[i]![j] = Math.min(
+        d[i - 1]![j]! + 1,
+        d[i]![j - 1]! + 1,
+        d[i - 1]![j - 1]! + (a[i - 1]!.toLowerCase() === b[j - 1]!.toLowerCase() ? 0 : 1),
+      );
+  return d[a.length]![b.length]!;
+}
+
+/** A typo in a config key would otherwise be silently ignored, e.g. `ignoreEventTypes`. */
+function unknownKeyMessage(key: string): string {
+  const best = [...KNOWN_KEYS].sort((x, y) => editDistance(key, x) - editDistance(key, y))[0]!;
+  const hint = editDistance(key, best) <= 3 ? ` Did you mean \`${best}\`?` : '';
+  return `unknown config key \`${key}\`.${hint}`;
+}
+
 /** Path of this package's entry, so configs can `import ... from 'hookstorm-cli'` without installing it. */
 function selfEntry(): string {
   const here = fileURLToPath(import.meta.url);
   const ext = extname(here); // .ts when running from source, .js from dist
   const candidates = [resolve(dirname(here), `index${ext}`), resolve(dirname(here), '../index.js')];
   return candidates.find((c) => existsSync(c)) ?? candidates[0]!;
+}
+
+/**
+ * Loads environment variables for the config, so `secret: process.env.X` can read the same `.env` the app uses.
+ * `envFile`: `undefined` = `.env` next to the config if it exists; a path = that file (must exist);
+ * `false` = load nothing. Variables already set in the shell always win. Returns the file loaded, if any.
+ */
+export function loadEnvForConfig(
+  configPath: string,
+  envFile: string | false | undefined,
+): string | undefined {
+  if (envFile === false) return undefined;
+  const path = envFile === undefined ? resolve(dirname(resolve(configPath)), '.env') : resolve(envFile);
+  if (!existsSync(path)) {
+    if (envFile !== undefined) throw new ConfigError(`env file not found: ${path}`);
+    return undefined;
+  }
+  process.loadEnvFile(path);
+  return path;
 }
 
 export async function loadConfigFile(path: string): Promise<HookstormConfig> {
@@ -103,6 +167,13 @@ export async function resolveConfig(
     throw new ConfigError(`${configPath ?? 'config'}: ${msg}`);
   };
   if (!config || typeof config !== 'object') fail('must export a config object (use defineConfig)');
+  for (const key of Object.keys(config))
+    if (!(KNOWN_KEYS as readonly string[]).includes(key)) fail(unknownKeyMessage(key));
+  if (
+    config.ignoredEventTypes !== undefined &&
+    (!Array.isArray(config.ignoredEventTypes) || config.ignoredEventTypes.some((t) => typeof t !== 'string'))
+  )
+    fail('`ignoredEventTypes` must be an array of event type strings');
   const target = overrides.target ?? config.target;
   if (!target) fail('`target` is required (or pass --target)');
   try {
@@ -168,6 +239,7 @@ export async function resolveConfig(
       const k = userKey ? userKey(e) : preset.eventKey(e);
       return k === undefined || k === null ? undefined : String(k);
     },
+    ignoredEventTypes: config.ignoredEventTypes ?? [],
     invariants: config.invariants,
   };
 }

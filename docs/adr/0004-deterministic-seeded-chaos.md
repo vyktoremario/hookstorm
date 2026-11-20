@@ -16,6 +16,6 @@ A chaos tool that finds a bug but can't reproduce it is of little use. `Math.ran
 
 ## Consequences
 
-- Hookstorm's own behaviour is exactly reproducible. The _app's_ behaviour under concurrency may not be: a race found with seed 42 may only show up on some runs. The report says so honestly (e.g. "concurrent fault involved: may be timing-dependent"), and rerunning the printed command a few times shows how often it fails. (A built-in `--repeat-seed K` flag is planned, not in v0.1.)
+- Hookstorm's own behaviour is exactly reproducible. The _app's_ behaviour under concurrency may not be: a race found with seed 42 may only show up on some runs. The report says so: when two deliveries of the same event were in flight at once, it notes that a race may not fail on every rerun. `--repeat-seed K` replays each seed's plan K times and reports, per seed, whether the failure happened on every run (deterministic) or only some runs (timing-dependent). (Added in 0.2; until then you had to rerun the command by hand.)
 - Unit-testing the scenario engine is simple: it's a pure function.
 - Shrinking (finding the smallest failing plan) becomes possible later because plans are data.

@@ -11,7 +11,15 @@ export interface RecordOptions {
   forward?: string;
   out: string;
   log?: (line: string) => void;
+  /** Print a troubleshooting hint if nothing has been recorded after this long (default 30 s; 0 disables). */
+  idleHintMs?: number;
 }
+
+const IDLE_HINTS: Partial<Record<ProviderName, string>> = {
+  stripe:
+    'No events yet. Check `stripe listen` is running with --forward-to pointing here and an --events list, ' +
+    'and that it uses the same account as your app\'s key: stripe listen --api-key "$STRIPE_SECRET_KEY" …',
+};
 
 const HOP_HEADERS = new Set([
   'host',
@@ -34,6 +42,17 @@ export async function startRecorder(opts: RecordOptions): Promise<{ url: string;
   const preset = getPreset(opts.provider, () => ({}));
   const log = opts.log ?? (() => {});
   let n = 0;
+  const idle =
+    (opts.idleHintMs ?? 30_000) > 0
+      ? setTimeout(() => {
+          if (n === 0)
+            log(
+              IDLE_HINTS[opts.provider] ??
+                'No events yet. Check the provider (or tunnel) sends webhooks to this address, in test mode.',
+            );
+        }, opts.idleHintMs ?? 30_000)
+      : undefined;
+  idle?.unref();
   const server = http.createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => chunks.push(c));
@@ -89,6 +108,7 @@ export async function startRecorder(opts: RecordOptions): Promise<{ url: string;
     url: `http://${opts.host ?? '127.0.0.1'}:${port}`,
     close: () =>
       new Promise<void>((r) => {
+        clearTimeout(idle);
         server.closeAllConnections();
         server.close(() => r());
       }),

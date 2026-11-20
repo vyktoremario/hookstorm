@@ -7,6 +7,7 @@
 //   RUNS=20 SEED=7 node scripts/demo.mjs
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -27,9 +28,21 @@ if (!existsSync(cli)) {
   if (b.status !== 0) process.exit(b.status ?? 1);
 }
 
-function startReceiver(name) {
+/** A free TCP port, so the demo never collides with something already running (e.g. another app on 3001). */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const s = createServer().once('error', reject);
+    s.listen(0, '127.0.0.1', () => {
+      const { port } = s.address();
+      s.close(() => resolve(port));
+    });
+  });
+}
+
+function startReceiver(name, port, sinkPort) {
   const proc = spawn(node, [join(root, 'examples', `${name}-receiver`, 'server.mjs')], {
     cwd: root,
+    env: { ...process.env, PORT: String(port), SINK_URL: `http://127.0.0.1:${sinkPort}/sink` },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   return new Promise((resolve, reject) => {
@@ -40,7 +53,7 @@ function startReceiver(name) {
   });
 }
 
-function hookstorm(port) {
+function hookstorm(port, sinkPort) {
   const target = `http://127.0.0.1:${port}/webhooks/paystack`;
   const args = [
     cli,
@@ -49,6 +62,8 @@ function hookstorm(port) {
     'examples/hookstorm.config.ts',
     '--target',
     target,
+    '--sink-port',
+    String(sinkPort),
     '--seed',
     seed,
     '--runs',
@@ -66,11 +81,15 @@ process.on('exit', () => procs.forEach((p) => p.kill()));
 process.on('SIGINT', () => process.exit(130));
 
 try {
-  procs.push(await startReceiver('buggy'), await startReceiver('fixed'));
+  const [buggyPort, fixedPort, sinkPort] = [await freePort(), await freePort(), await freePort()];
+  procs.push(
+    await startReceiver('buggy', buggyPort, sinkPort),
+    await startReceiver('fixed', fixedPort, sinkPort),
+  );
   console.log('━━━ 1/2  buggy receiver ━━━');
-  const buggy = await hookstorm(3001);
+  const buggy = await hookstorm(buggyPort, sinkPort);
   console.log('\n━━━ 2/2  fixed receiver ━━━');
-  const fixed = await hookstorm(3002);
+  const fixed = await hookstorm(fixedPort, sinkPort);
   console.log(`\nexit codes: buggy=${buggy} (expected 1), fixed=${fixed} (expected 0)`);
   process.exitCode = buggy === 1 && fixed === 0 ? 0 : 1;
 } catch (e) {

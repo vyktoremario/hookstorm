@@ -105,7 +105,15 @@ npx hookstorm init --provider custom --target http://localhost:3000/webhooks   #
 3. **Write the invariants**, then run `npx hookstorm run`.
 
 ```ts
-import { atMostOnce, custom, defineConfig, exactlyOnce, finalState, monotonic } from 'hookstorm-cli';
+import {
+  atMostOnce,
+  custom,
+  defineConfig,
+  eventsTakeEffect,
+  exactlyOnce,
+  finalState,
+  monotonic,
+} from 'hookstorm-cli';
 
 export default defineConfig({
   target: 'http://localhost:3000/webhooks/stripe',
@@ -115,6 +123,7 @@ export default defineConfig({
   profile: 'realistic', // gentle | realistic | hostile | { extends: 'hostile', duplicate: 0.8 }
   reset: '/hookstorm/reset', // paths resolve against target's origin
   probe: '/hookstorm/state',
+  ignoredEventTypes: ['payment_intent.created', 'charge.updated'], // delivered, but left out of timelines
   sink: { port: 4400, faults: { 'email.send': 0.2 } }, // make downstream calls flaky on purpose
 
   invariants: [
@@ -122,6 +131,11 @@ export default defineConfig({
     exactlyOnce('order.fulfil', (call) => call.body.orderId, {
       forEachEvent: 'payment_intent.succeeded',
       eventKey: (e) => e.json.data.object.metadata.order_id,
+    }),
+    eventsTakeEffect({
+      forEachEvent: 'payment_intent.succeeded',
+      eventKey: (e) => e.json.data.object.metadata.order_id,
+      record: (state, id) => state.orders.find((o) => o.id === id), // catches events the app silently ignored
     }),
     monotonic('order.status', ['pending', 'paid', 'shipped', 'refunded'], { key: (c) => c.body.orderId }),
     finalState('refunded orders stay refunded', (state) => state.orders.ord_1.status === 'refunded'),
@@ -136,13 +150,14 @@ export default defineConfig({
 
 ### Invariant helpers
 
-| Helper                                       | Catches                                                                                                          |
-| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `atMostOnce(effect, key)`                    | double charge, double fulfilment, duplicate emails                                                               |
-| `exactlyOnce(effect, key, { forEachEvent })` | duplicates **and** lost events (acked, but the work never happened). Skips events the provider is still retrying |
-| `monotonic(effect, order, { key })`          | state moving backwards in the side-effect stream                                                                 |
-| `finalState(description, (state) => …)`      | wrong final state, read from your probe                                                                          |
-| `custom(name, (observations) => string[])`   | anything else: you get events, plan, delivery log, sink log and state                                            |
+| Helper                                                 | Catches                                                                                                                              |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `atMostOnce(effect, key)`                              | double charge, double fulfilment, duplicate emails                                                                                   |
+| `exactlyOnce(effect, key, { forEachEvent })`           | duplicates **and** lost events (acked, but the work never happened). Skips events the provider is still retrying                     |
+| `monotonic(effect, order, { key })`                    | state moving backwards in the side-effect stream                                                                                     |
+| `finalState(description, (state) => …)`                | wrong final state, read from your probe                                                                                              |
+| `eventsTakeEffect({ forEachEvent, eventKey, record })` | events your app acknowledged but ignored, e.g. because `reset` didn't seed the record they refer to. Also works with a sink `effect` |
+| `custom(name, (observations) => string[])`             | anything else: you get events, plan, delivery log, sink log and state                                                                |
 
 Only sink calls that succeeded count. A call the sink failed on purpose didn't happen.
 
@@ -161,21 +176,29 @@ Stripe and GitHub signatures are tested against the official `stripe` SDK and `@
 
 ```bash
 npx hookstorm record --provider stripe --port 4500 --forward http://localhost:3000/webhooks/stripe
-stripe listen --forward-to localhost:4500
+stripe listen --api-key "$STRIPE_SECRET_KEY" --forward-to localhost:4500 \
+  --events payment_intent.succeeded,charge.refunded   # the types your app handles, plus any you want as noise
 ```
+
+Current Stripe CLI versions need an `--events` list (or `--all-snapshot`). `--api-key` makes the CLI listen on the same Stripe account as your app's key. If they differ, no events arrive and nothing tells you why.
 
 The recorder saves each body byte-for-byte, drops signature headers (replays are re-signed), skips Stripe `livemode: true` events, and forwards the original request unchanged, so your app keeps working while you record.
 
 ### CLI
 
 ```text
-hookstorm run   [-c hookstorm.config.ts] [--target url] [--seed n] [--runs 10] [--profile realistic]
+hookstorm run   [-c hookstorm.config.ts] [--target url] [--seed n] [--runs 10] [--repeat-seed 1] [--profile realistic]
                 [--timeout ms] [--settle ms] [--sink-port 4400] [--json report.json] [--junit report.xml] [-q]
+                [--env-file .env | --no-env-file] [--full-timeline]
 hookstorm init  [--provider stripe|paystack|github|custom] [--target url]
 hookstorm record --provider <name> [--port 4500] [--forward url] [-o hookstorm.events.jsonl]
 ```
 
-Exit codes: `0` all invariants held, `1` violations found, `2` config error or target unreachable.
+Exit codes: `0` all invariants held, `1` violations found, `2` config error, target unreachable, or **inconclusive** (every run warned that the events had no visible effect, so nothing was really tested).
+
+`--repeat-seed n` replays each seed's plan n times and reports how often each rule failed per seed. "Every run" means a deterministic ordering or retry bug, while "7/20 runs" means a race that depends on your app's timing.
+
+`hookstorm run` loads `.env` next to the config by default, so `secret: process.env.…` matches what your app uses. Variables already set in the shell win.
 
 ### In CI
 
@@ -186,7 +209,7 @@ Exit codes: `0` all invariants held, `1` violations found, `2` config error or t
 
 ## Limits (v0.1)
 
-- Hookstorm's own plan is fully reproducible from a seed. Your app's behaviour under concurrency may not be: a race found with one seed can be timing-dependent, and the report says so when a plan included concurrent deliveries.
+- Hookstorm's own plan is fully reproducible from a seed. Your app's behaviour under concurrency may not be: a race found with one seed can be timing-dependent. The report says so when deliveries overlapped, and `--repeat-seed` measures how often it fails.
 - Default response timeout is 1 s, much stricter than real providers (10–30 s), to surface slow work before the ack. Raise it with `--timeout` if that's not what you want to test.
 - It sees side effects that go through the sink, and state that your probe exposes. Writes straight to your own database are only visible through the probe.
 - Not yet: HTML report, test-case shrinking, inline live-proxy mode, more presets. See [SPEC §7](docs/SPEC.md).

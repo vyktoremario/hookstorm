@@ -27,6 +27,7 @@ describe('demo receivers', () => {
     const suite = await suiteAgainst('buggy', seedsFor(1, 5));
     expect(suite.passed).toBe(false);
     expect(suite.runs.every((r) => !r.fatal)).toBe(true);
+    expect(suite.inconclusive).toBe(false);
     expect([...suite.failedInvariants].sort()).toEqual(
       [
         'a refunded payment stays refunded',
@@ -44,6 +45,7 @@ describe('demo receivers', () => {
       .filter((r) => r.violations.length)
       .map((r) => ({ seed: r.seed, v: r.violations }));
     expect(failures).toEqual([]);
+    expect(suite.runs.flatMap((r) => r.warnings)).toEqual([]);
     expect(suite.passed).toBe(true);
   });
 });
