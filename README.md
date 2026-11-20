@@ -199,4 +199,4 @@ npm run lint && npm run typecheck && npm run build && npm test
 npm run demo
 ```
 
-Requires Node ≥ 22.12. Tested on Linux, macOS and Windows. Releases: [docs/RELEASING.md](docs/RELEASING.md). MIT licensed.
+Requires Node ≥ 22.12. Tested on Linux, macOS and Windows. Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Releases: [docs/RELEASING.md](docs/RELEASING.md). MIT licensed.

@@ -166,7 +166,7 @@ The exact retry/timeout defaults are checked against each provider's current doc
 - **Integration:** start the sink and the example receivers in-process on ephemeral ports. Assert that the **buggy receiver fails with exactly the expected violation kinds** across a fixed set of seeds, and the **fixed receiver passes across 50 seeds**. This is Hookstorm's own regression suite and doubles as proof that the demo works.
 - **Simulator behaviour:** a fake receiver with scripted latency/status asserts retries, timeouts, aborts and dropped responses happen as planned.
 - **CLI e2e:** run the built `dist/cli.js` against the examples; check exit codes and JSON report shape.
-- **CI (GitHub Actions):** Node 22 and 24 on ubuntu, plus Node 24 on macOS and Windows: lint (eslint + prettier check), typecheck, test, build, demo smoke test, `npm pack --dry-run`. Releases are a workflow triggered by `v*` tags, publishing with npm trusted publishing (OIDC, provenance included). See `docs/RELEASING.md`.
+- **CI (GitHub Actions):** Node 22 and 24 on ubuntu, plus Node 24 on macOS and Windows: lint (eslint + prettier check), typecheck, test, build, demo smoke test, `npm pack --dry-run`. Releases are automated with release-please (Conventional Commit PR titles → release PR → tag), publishing with npm trusted publishing (OIDC, provenance included). See `docs/RELEASING.md`.
 
 ## 10. Distribution
 
