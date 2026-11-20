@@ -222,9 +222,27 @@ Useful flags:
 - `--settle <ms>`: how long to wait for background work before reading state. The default is 500. Raise it if your app processes webhooks on a queue.
 - `--env-file <path>`: Hookstorm loads `.env` next to the config by default, so `secret: process.env.STRIPE_WEBHOOK_SECRET` matches what your app uses. Use this flag to pick another file, or `--no-env-file` to load none. Variables already set in your shell always win.
 
+### Deterministic bugs and races
+
+Hookstorm's plan is fully decided by the seed, so a bug caused by ordering or retries fails every time you rerun its seed. A **race** is different. Two copies of an event arrive together, and whether they collide depends on your app's timing (database latency, load). So a race found with seed 4 may pass when you rerun seed 4, even though the bug is still there. When two deliveries of the same event were in flight at once, the report notes this and gives you a command to measure it:
+
+```bash
+npx hookstorm run --seed 4 --runs 1 --repeat-seed 20
+```
+
+```text
+✗ at most one payment ledger entry per order
+  violated 19× in 19/20 runs (1/1 seed(s), each run 20×)
+  failure rate: seed 4: 19/20 runs (timing-dependent)
+```
+
+That's a real result from a NestJS + Postgres app whose handler checks `status === 'paid'` outside its transaction. The same plan failed 19 times out of 20, and the first run passed.
+
+`every run` means deterministic; `n/20 runs (timing-dependent)` means a race. To check a race fix, one green rerun isn't proof. Run many seeds with more chaos, e.g. `--runs 50 --profile hostile`, or repeat the seed that failed. A real fix (a unique constraint on processed event ids, a row lock) makes the race impossible, so it passes on every run.
+
 ### What to do with a failure
 
-1. Rerun the printed command. If it fails every time, it's an ordering or retry bug. If it fails only sometimes and the report says the plan had concurrent deliveries, it's a race.
+1. Rerun the printed command. If the report mentions deliveries in flight at once, add `--repeat-seed 20` to see whether it's a race (see above).
 2. Read the timeline: which attempt was dropped, timed out, or arrived out of order.
 3. The usual fixes:
    - **Idempotency key** with an atomic insert (`INSERT … ON CONFLICT DO NOTHING`) in the same transaction as the work.

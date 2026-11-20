@@ -40,13 +40,19 @@ program
   .option('-t, --target <url>', 'override the target URL')
   .option('-s, --seed <n>', 'first seed (default: random)', int('seed'))
   .option('-n, --runs <n>', 'number of seeds to try', int('runs'), 10)
+  .option(
+    '--repeat-seed <n>',
+    'run each seed n times: same plan, so a seed failing only some of the time points to a race',
+    int('repeat-seed'),
+    1,
+  )
   .addOption(new Option('-p, --profile <name>', 'fault profile').choices(['gentle', 'realistic', 'hostile']))
   .option('--timeout <ms>', 'per-attempt response timeout', int('timeout'))
   .option('--settle <ms>', 'wait before probing state', int('settle'))
   .option('--sink-port <port>', 'sink port', int('sink-port'))
   .option('--json <path>', 'write a JSON report')
   .option('--junit <path>', 'write a JUnit XML report')
-  .option('--full-timeline', 'show every related delivery in timelines, including uneventful ones')
+  .option('--full-timeline', 'include ignoredEventTypes in violation timelines')
   .option('--examples <n>', 'example violations to show per invariant', int('examples'), 1)
   .option('-q, --quiet', 'only print the final report')
   .action(async (opts) => {
@@ -60,12 +66,13 @@ program
       sinkPort: opts.sinkPort,
     });
     const base = opts.seed ?? randomSeed();
-    const seeds = seedsFor(base, Math.max(1, opts.runs));
+    const repeat = Math.max(1, opts.repeatSeed);
+    const seeds = seedsFor(base, opts.runs, repeat);
     if (!opts.quiet) {
       console.log(
         pc.bold('hookstorm') +
           pc.dim(
-            ` v${VERSION} · ${cfg.preset.name} → ${cfg.target} · profile ${cfg.profileName} · ${cfg.events.length} events · ${seeds.length} seed(s) from ${base}`,
+            ` v${VERSION} · ${cfg.preset.name} → ${cfg.target} · profile ${cfg.profileName} · ${cfg.events.length} events · ${repeat > 1 ? `${seeds.length / repeat} seed(s) × ${repeat} runs` : `${seeds.length} seed(s)`} from ${base}`,
           ),
       );
       if (envFile) console.log(pc.dim(`loaded ${envFile}`));
@@ -73,7 +80,7 @@ program
     }
     const suite = await runSuite(cfg, seeds, {
       onRunEnd: (r, i, total) => {
-        if (!opts.quiet) console.log(formatRunLine(r, i, total));
+        if (!opts.quiet) console.log(formatRunLine(r, i, total, repeat));
       },
     });
     console.log(formatSuite(suite, { maxExamples: opts.examples, fullTimeline: opts.fullTimeline }));

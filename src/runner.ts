@@ -25,13 +25,16 @@ export interface RunResult {
   fatal?: string;
   /** Things that make this run's result untrustworthy, e.g. the events had no visible effect. */
   warnings: string[];
+  /** 1-based index of this run among the runs of the same seed (`--repeat-seed`). */
+  repeat: number;
 }
 
 /** A warning raised when nothing the app did could be observed, so passing rules prove nothing. */
 export const NO_EFFECT_WARNING =
   'the events had no visible effect: no sink calls, and the probe state after the run equals the state right after reset. ' +
   'Rules that look at effects pass without testing anything. Common causes: reset removes the rows the events refer to ' +
-  '(seed them instead), the handler ignores these event types, or side effects are not pointed at the sink.';
+  '(seed them instead), the handler ignores these event types, side effects are not pointed at the sink, or the app ' +
+  'processes webhooks in the background and needs a longer --settle.';
 
 export interface SuiteResult {
   config: ResolvedConfig;
@@ -41,6 +44,8 @@ export interface SuiteResult {
   passed: boolean;
   /** Every run raised the no-effect warning: the suite tested nothing, so it is not a pass. */
   inconclusive: boolean;
+  /** How many times each seed was run (`--repeat-seed`); 1 normally. */
+  repeat: number;
   durationMs: number;
 }
 
@@ -71,7 +76,16 @@ export async function runOnce(cfg: ResolvedConfig, sink: SinkServer, seed: numbe
     seed,
     maxAttempts: cfg.maxAttempts,
   });
-  const empty = { seed, plan, deliveries: [], sink: [], state: undefined, violations: [], warnings: [] };
+  const empty = {
+    seed,
+    plan,
+    deliveries: [],
+    sink: [],
+    state: undefined,
+    violations: [],
+    warnings: [],
+    repeat: 1,
+  };
 
   try {
     await callHook(cfg.reset, 'POST');
@@ -147,6 +161,7 @@ export async function runOnce(cfg: ResolvedConfig, sink: SinkServer, seed: numbe
     state,
     violations,
     warnings: runWarnings(cfg, deliveries, sinkCalls, baseline, state),
+    repeat: 1,
     durationMs: performance.now() - started,
   };
 }
@@ -225,10 +240,13 @@ export async function runSuite(
     });
   }
   const runs: RunResult[] = [];
+  const timesRun = new Map<number, number>();
   try {
     for (let i = 0; i < seeds.length; i++) {
       hooks.onRunStart?.(seeds[i]!, i, seeds.length);
       const r = await runOnce(cfg, sink, seeds[i]!);
+      r.repeat = (timesRun.get(r.seed) ?? 0) + 1;
+      timesRun.set(r.seed, r.repeat);
       runs.push(r);
       hooks.onRunEnd?.(r, i, seeds.length);
       if (r.fatal) break;
@@ -243,11 +261,17 @@ export async function runSuite(
     runs,
     failedInvariants,
     inconclusive,
+    repeat: Math.max(1, ...timesRun.values()),
     passed: !inconclusive && runs.every((r) => !r.fatal && r.violations.length === 0),
     durationMs: performance.now() - started,
   };
 }
 
-export function seedsFor(base: number, runs: number): number[] {
-  return Array.from({ length: runs }, (_, i) => (base + i) % 2 ** 31 || 1);
+/**
+ * Seeds for a suite: `runs` consecutive seeds from `base`, each run `repeat` times in a row. Repeating a seed
+ * replays the same plan; only the app's own timing differs, so it measures how often a race actually fails.
+ */
+export function seedsFor(base: number, runs: number, repeat = 1): number[] {
+  const seeds = Array.from({ length: Math.max(1, runs) }, (_, i) => (base + i) % 2 ** 31 || 1);
+  return seeds.flatMap((s) => Array<number>(Math.max(1, repeat)).fill(s));
 }

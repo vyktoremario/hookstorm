@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveConfig, type HookstormConfig } from '../src/config.js';
 import { custom } from '../src/invariants.js';
-import { runSuite, NO_EFFECT_WARNING } from '../src/runner.js';
+import { runSuite, seedsFor, NO_EFFECT_WARNING } from '../src/runner.js';
 import { toJunit } from '../src/report.js';
 import { fakeReceiver, freePort } from './helpers.js';
 
@@ -55,5 +55,41 @@ describe('run warnings', () => {
     const s = await suite({ probe: () => ({}) }, 401);
     expect(s.runs[0]!.warnings).toHaveLength(1);
     expect(s.runs[0]!.warnings[0]).toMatch(/no delivery was acknowledged \(the app answered 401\)/);
+  });
+});
+
+describe('seedsFor', () => {
+  it('runs consecutive seeds, each repeated in a row', () => {
+    expect(seedsFor(5, 3)).toEqual([5, 6, 7]);
+    expect(seedsFor(5, 2, 3)).toEqual([5, 5, 5, 6, 6, 6]);
+    expect(seedsFor(5, 0, 0)).toEqual([5]);
+  });
+});
+
+describe('runSuite with repeated seeds', () => {
+  it('numbers the repeats of each seed and records the repeat count', async () => {
+    const rx = await fakeReceiver();
+    close = rx.close;
+    let n = 0;
+    const cfg = await resolveConfig({
+      target: rx.url,
+      provider: 'paystack',
+      secret: 'sk_test',
+      events: [{ id: 'e1', body: { event: 'charge.success', data: { reference: 'r1' } } }],
+      settleMs: 0,
+      sink: { port: await freePort() },
+      probe: () => ({ n: n++ }),
+      invariants: [custom('holds', () => [])],
+    });
+    const s = await runSuite(cfg, seedsFor(9, 2, 2));
+    expect(s.runs.map((r) => [r.seed, r.repeat])).toEqual([
+      [9, 1],
+      [9, 2],
+      [10, 1],
+      [10, 2],
+    ]);
+    expect(s.repeat).toBe(2);
+    // Same seed, same plan: only the app's timing can differ between repeats.
+    expect(s.runs[0]!.plan).toEqual(s.runs[1]!.plan);
   });
 });

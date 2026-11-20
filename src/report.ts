@@ -81,13 +81,39 @@ function overlapped(run: RunResult, eventIds: Set<string>): boolean {
   return false;
 }
 
-export function rerunCommand(suite: SuiteResult, seed: number): string {
+export function rerunCommand(suite: SuiteResult, seed: number, repeat = 1): string {
   const c = suite.config.configPath ? ` -c ${suite.config.configPath}` : '';
-  return `hookstorm run${c} --target ${suite.config.target} --seed ${seed} --runs 1`;
+  const r = repeat > 1 ? ` --repeat-seed ${repeat}` : '';
+  return `hookstorm run${c} --target ${suite.config.target} --seed ${seed} --runs 1${r}`;
 }
 
-export function formatRunLine(r: RunResult, i: number, total: number): string {
+/**
+ * With --repeat-seed: how often the invariant failed for each seed. A seed that fails on every repeat is
+ * deterministic (ordering, retries); one that fails on some repeats depends on the app's timing (a race).
+ */
+function failureRates(suite: SuiteResult, invariant: string): string {
+  const bySeed = new Map<number, { failed: number; total: number }>();
+  for (const r of suite.runs) {
+    const e = bySeed.get(r.seed) ?? { failed: 0, total: 0 };
+    e.total++;
+    if (r.violations.some((v) => v.invariant === invariant)) e.failed++;
+    bySeed.set(r.seed, e);
+  }
+  const failing = [...bySeed].filter(([, e]) => e.failed > 0);
+  const parts = failing
+    .slice(0, 8)
+    .map(([seed, e]) =>
+      e.failed === e.total
+        ? `seed ${seed}: every run`
+        : `seed ${seed}: ${e.failed}/${e.total} runs (timing-dependent)`,
+    );
+  const more = failing.length > 8 ? `, and ${failing.length - 8} more seed(s)` : '';
+  return `failure rate: ${parts.join(', ')}${more}`;
+}
+
+export function formatRunLine(r: RunResult, i: number, total: number, repeat = 1): string {
   const n = `[${String(i + 1).padStart(String(total).length)}/${total}]`;
+  const seedLabel = repeat > 1 ? `${r.seed} (${r.repeat}/${repeat})` : String(r.seed);
   const plan = describeFaults(r.plan);
   const attempts = r.deliveries.flatMap((d) => d.attempts);
   const count = (...o: AttemptRecord['outcome'][]) => attempts.filter((a) => o.includes(a.outcome)).length;
@@ -95,9 +121,9 @@ export function formatRunLine(r: RunResult, i: number, total: number): string {
     `${attempts.length} attempts: ${plan.duplicates} dup, ${plan.concurrent} concurrent, ${count('notSent')} dropped requests, ${count('responseDropped')} dropped responses, ${count('timedOut', 'aborted')} timeouts`,
   );
   const warn = r.warnings.length ? `  ${pc.yellow('⚠ warning')}` : '';
-  if (r.fatal) return `${n} seed ${r.seed}  ${pc.red('ERROR')} ${r.fatal}`;
-  if (r.violations.length === 0) return `${n} seed ${r.seed}  ${pc.green('pass')}${warn}  ${summary}`;
-  return `${n} seed ${r.seed}  ${pc.red(`${r.violations.length} violation(s)`)}${warn}  ${summary}`;
+  if (r.fatal) return `${n} seed ${seedLabel}  ${pc.red('ERROR')} ${r.fatal}`;
+  if (r.violations.length === 0) return `${n} seed ${seedLabel}  ${pc.green('pass')}${warn}  ${summary}`;
+  return `${n} seed ${seedLabel}  ${pc.red(`${r.violations.length} violation(s)`)}${warn}  ${summary}`;
 }
 
 /** Distinct warnings across runs, each with how many seeds raised it. */
@@ -140,7 +166,11 @@ export function formatSuite(
     out.push(
       pc.green(
         pc.bold(
-          `✓ All ${suite.config.invariants.length} invariants held across ${suite.runs.length} seed(s)`,
+          `✓ All ${suite.config.invariants.length} invariants held across ${
+            suite.repeat > 1
+              ? `${new Set(suite.runs.map((r) => r.seed)).size} seed(s) × ${suite.repeat} runs`
+              : `${suite.runs.length} seed(s)`
+          }`,
         ),
       ) + pc.dim(` (${(suite.durationMs / 1000).toFixed(1)}s)`),
     );
@@ -156,10 +186,19 @@ export function formatSuite(
       byInvariant.set(v.invariant, list);
     }
 
+  const allSeeds = new Set(suite.runs.map((r) => r.seed));
   for (const [name, hits] of byInvariant) {
     const seeds = [...new Set(hits.map((h) => h.run.seed))];
+    const failedRuns = new Set(hits.map((h) => h.run));
     out.push(pc.red(pc.bold(`✗ ${name}`)));
-    out.push(pc.dim(`  violated ${hits.length}× across ${seeds.length}/${suite.runs.length} seed(s)`));
+    out.push(
+      pc.dim(
+        suite.repeat > 1
+          ? `  violated ${hits.length}× in ${failedRuns.size}/${suite.runs.length} runs (${seeds.length}/${allSeeds.size} seed(s), each run ${suite.repeat}×)`
+          : `  violated ${hits.length}× across ${seeds.length}/${allSeeds.size} seed(s)`,
+      ),
+    );
+    if (suite.repeat > 1) out.push(pc.dim(`  ${failureRates(suite, name)}`));
     for (const { run, v } of hits.slice(0, opts.maxExamples ?? 1)) {
       out.push(`  ${v.message}  ${pc.dim(`(seed ${run.seed})`)}`);
       const { lines, hidden } = timeline(run, v, suite, opts.fullTimeline);
@@ -169,10 +208,11 @@ export function formatSuite(
           pc.dim(`    (${hidden} related event(s) of ignored types hidden; --full-timeline shows them)`),
         );
       out.push(pc.dim(`    reproduce: ${rerunCommand(suite, run.seed)}`));
-      if (overlapped(run, relatedEvents(v, suite)))
+      if (overlapped(run, relatedEvents(v, suite)) && suite.repeat === 1)
         out.push(
           pc.dim(
-            '    note: two deliveries of the same event were in flight at once; a race may not fail on every rerun',
+            '    note: two deliveries of the same event were in flight at once; a race may not fail on every rerun.\n' +
+              `    To see how often it fails: ${rerunCommand(suite, run.seed, 20)}`,
           ),
         );
     }
@@ -182,7 +222,9 @@ export function formatSuite(
   out.push(
     pc.red(
       pc.bold(
-        `${byInvariant.size} of ${suite.config.invariants.length} invariants violated in ${failing.length}/${suite.runs.length} seed(s)`,
+        suite.repeat > 1
+          ? `${byInvariant.size} of ${suite.config.invariants.length} invariants violated in ${failing.length}/${suite.runs.length} runs`
+          : `${byInvariant.size} of ${suite.config.invariants.length} invariants violated in ${failing.length}/${suite.runs.length} seed(s)`,
       ),
     ),
   );
@@ -194,6 +236,7 @@ export function toJson(suite: SuiteResult): object {
     tool: 'hookstorm',
     passed: suite.passed,
     inconclusive: suite.inconclusive,
+    repeat: suite.repeat,
     target: suite.config.target,
     provider: suite.config.preset.name,
     profile: suite.config.profileName,
@@ -202,6 +245,7 @@ export function toJson(suite: SuiteResult): object {
     failedInvariants: suite.failedInvariants,
     runs: suite.runs.map((r) => ({
       seed: r.seed,
+      repeat: r.repeat,
       passed: !r.fatal && r.violations.length === 0,
       fatal: r.fatal,
       warnings: r.warnings,
@@ -225,7 +269,9 @@ export function toJunit(suite: SuiteResult): string {
   for (const run of suite.runs) {
     for (const inv of suite.config.invariants) {
       const vs = run.violations.filter((v) => v.invariant === inv.name);
-      const name = xml(`${inv.name} [seed ${run.seed}]`);
+      const name = xml(
+        `${inv.name} [seed ${run.seed}${suite.repeat > 1 ? `, run ${run.repeat}/${suite.repeat}` : ''}]`,
+      );
       if (run.fatal) {
         failures++;
         cases.push(

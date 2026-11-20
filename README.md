@@ -173,7 +173,7 @@ The recorder saves each body byte-for-byte, drops signature headers (replays are
 ### CLI
 
 ```text
-hookstorm run   [-c hookstorm.config.ts] [--target url] [--seed n] [--runs 10] [--profile realistic]
+hookstorm run   [-c hookstorm.config.ts] [--target url] [--seed n] [--runs 10] [--repeat-seed 1] [--profile realistic]
                 [--timeout ms] [--settle ms] [--sink-port 4400] [--json report.json] [--junit report.xml] [-q]
                 [--env-file .env | --no-env-file] [--full-timeline]
 hookstorm init  [--provider stripe|paystack|github|custom] [--target url]
@@ -181,6 +181,8 @@ hookstorm record --provider <name> [--port 4500] [--forward url] [-o hookstorm.e
 ```
 
 Exit codes: `0` all invariants held, `1` violations found, `2` config error, target unreachable, or **inconclusive** (every run warned that the events had no visible effect, so nothing was really tested).
+
+`--repeat-seed n` replays each seed's plan n times and reports how often each rule failed per seed. "Every run" means a deterministic ordering or retry bug, while "7/20 runs" means a race that depends on your app's timing.
 
 `hookstorm run` loads `.env` next to the config by default, so `secret: process.env.…` matches what your app uses. Variables already set in the shell win.
 
@@ -193,7 +195,7 @@ Exit codes: `0` all invariants held, `1` violations found, `2` config error, tar
 
 ## Limits (v0.1)
 
-- Hookstorm's own plan is fully reproducible from a seed. Your app's behaviour under concurrency may not be: a race found with one seed can be timing-dependent, and the report says so when a plan included concurrent deliveries.
+- Hookstorm's own plan is fully reproducible from a seed. Your app's behaviour under concurrency may not be: a race found with one seed can be timing-dependent. The report says so when deliveries overlapped, and `--repeat-seed` measures how often it fails.
 - Default response timeout is 1 s, much stricter than real providers (10–30 s), to surface slow work before the ack. Raise it with `--timeout` if that's not what you want to test.
 - It sees side effects that go through the sink, and state that your probe exposes. Writes straight to your own database are only visible through the probe.
 - Not yet: HTML report, test-case shrinking, inline live-proxy mode, more presets. See [SPEC §7](docs/SPEC.md).

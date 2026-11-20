@@ -39,6 +39,13 @@ describe('resolveConfig', () => {
     ['no invariants', { invariants: [] }, /invariants/],
     ['custom without sign', { provider: 'custom' }, /sign/],
     ['bad profile', { profile: 'chaotic' as never }, /Unknown profile/],
+    [
+      'a misspelled key',
+      { ignoreEventTypes: ['x'] } as never,
+      /unknown config key `ignoreEventTypes`. Did you mean `ignoredEventTypes`\?/,
+    ],
+    ['an unrelated unknown key', { colour: 'blue' } as never, /unknown config key `colour`\.$/],
+    ['non-string ignoredEventTypes', { ignoredEventTypes: [1] as never }, /ignoredEventTypes/],
   ])('rejects %s', async (_name, patch, msg) => {
     await expect(resolveConfig({ ...base(), ...patch })).rejects.toThrow(msg);
     await expect(resolveConfig({ ...base(), ...patch })).rejects.toBeInstanceOf(ConfigError);

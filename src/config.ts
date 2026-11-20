@@ -82,6 +82,45 @@ export interface ConfigOverrides {
 
 export class ConfigError extends Error {}
 
+const KNOWN_KEYS = [
+  'target',
+  'provider',
+  'secret',
+  'sign',
+  'events',
+  'profile',
+  'maxAttempts',
+  'backoffMs',
+  'timeoutMs',
+  'settleMs',
+  'sink',
+  'reset',
+  'probe',
+  'ignoredEventTypes',
+  'eventKey',
+  'invariants',
+] as const satisfies ReadonlyArray<keyof HookstormConfig>;
+
+function editDistance(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array<number>(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0]![j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      d[i]![j] = Math.min(
+        d[i - 1]![j]! + 1,
+        d[i]![j - 1]! + 1,
+        d[i - 1]![j - 1]! + (a[i - 1]!.toLowerCase() === b[j - 1]!.toLowerCase() ? 0 : 1),
+      );
+  return d[a.length]![b.length]!;
+}
+
+/** A typo in a config key would otherwise be silently ignored, e.g. `ignoreEventTypes`. */
+function unknownKeyMessage(key: string): string {
+  const best = [...KNOWN_KEYS].sort((x, y) => editDistance(key, x) - editDistance(key, y))[0]!;
+  const hint = editDistance(key, best) <= 3 ? ` Did you mean \`${best}\`?` : '';
+  return `unknown config key \`${key}\`.${hint}`;
+}
+
 /** Path of this package's entry, so configs can `import ... from 'hookstorm-cli'` without installing it. */
 function selfEntry(): string {
   const here = fileURLToPath(import.meta.url);
@@ -128,6 +167,13 @@ export async function resolveConfig(
     throw new ConfigError(`${configPath ?? 'config'}: ${msg}`);
   };
   if (!config || typeof config !== 'object') fail('must export a config object (use defineConfig)');
+  for (const key of Object.keys(config))
+    if (!(KNOWN_KEYS as readonly string[]).includes(key)) fail(unknownKeyMessage(key));
+  if (
+    config.ignoredEventTypes !== undefined &&
+    (!Array.isArray(config.ignoredEventTypes) || config.ignoredEventTypes.some((t) => typeof t !== 'string'))
+  )
+    fail('`ignoredEventTypes` must be an array of event type strings');
   const target = overrides.target ?? config.target;
   if (!target) fail('`target` is required (or pass --target)');
   try {
