@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/vyktoremario/hookstorm/compare/v0.2.0...v0.2.1) (2026-11-21)
+
+
+### Documentation
+
+* link the hookstorm-playground example and its results ([#9](https://github.com/vyktoremario/hookstorm/issues/9)) ([00fdd49](https://github.com/vyktoremario/hookstorm/commit/00fdd49c2cc84c764f53348cad8396d567a10097))
+
 ## [0.2.0](https://github.com/vyktoremario/hookstorm/compare/v0.1.1...v0.2.0) (2026-11-20)
 
 
