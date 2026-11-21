@@ -161,6 +161,8 @@ So `reset` must recreate those records as they were _before_ the webhooks arrive
 2. Export the records those events refer to into a seed file, and reset them to their pre-webhook state (e.g. status `pending`, no ledger rows). A small script that `SELECT`s the orders that have a payment intent is enough.
 3. In `reset`, empty the tables and insert the seed.
 
+A complete example is [hookstorm-playground](https://github.com/vyktoremario/hookstorm-playground): a NestJS + Postgres + Stripe ticket shop with a seed export script, a reset route that re-inserts the seed, and a real Stripe recording workflow. It also shows the two bugs Hookstorm found in it, and the fix measured before and after.
+
 Hookstorm also checks this for you. When a probe is configured, it reads the state right after `reset` and again after the run. If they're identical and nothing called the sink, the run gets a warning:
 
 ```text
