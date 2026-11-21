@@ -64,6 +64,10 @@ What was wrong, and how each fix maps to a rule:
 | Ack `200` first, then fire-and-forget the debit, swallowing errors                | a flaky downstream call (sink fault)          | refund debited exactly once; balances | Do the work, then ack; on failure answer 500 so the provider retries                        |
 | No dedupe for refunds at all                                                      | duplicate delivery, dropped response          | refund debited exactly once           | Same idempotency claim as charges                                                           |
 
+### On a real app
+
+[hookstorm-playground](https://github.com/vyktoremario/hookstorm-playground) is a NestJS + Postgres ticket shop taking Stripe test-mode payments, with a careful-looking webhook handler (status check, transaction). Hookstorm, run against 14 real Stripe events, found two bugs: an order paid twice by concurrent duplicate deliveries, and a payment processed again after its refund. With the same recording and seeds, the failure rate went from 24/50 seeds (`realistic`) and 29/30 (`hostile`) before the fix to zero after, and 200 more hostile seeds also passed.
+
 ### Measured results (v0.1.0, MacBook, Node 22)
 
 - Buggy receiver: **5 of 5 invariants violated in 5 of 5 seeds** (seeds 1–5, `realistic` profile), about 8 s.
